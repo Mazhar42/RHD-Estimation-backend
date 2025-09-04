@@ -9,10 +9,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Estimation Backend", version="1.0.0")
 
 # CORS
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,

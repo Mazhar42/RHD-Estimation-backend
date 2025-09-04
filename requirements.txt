@@ -4,3 +4,4 @@ SQLAlchemy
 pydantic
 pydantic-settings
 python-multipart
+psycopg2-binary
