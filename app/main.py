@@ -1,10 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .database import Base, engine
+from .database import Base, engine, SessionLocal
 from .routers import items, projects, estimations
+from .seed import seed_data
+from .models import Item, ItemCategory
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Seed data if tables are empty
+db = SessionLocal()
+if not db.query(Item).count() and not db.query(ItemCategory).count():
+    seed_data()
+db.close()
 
 app = FastAPI(title="Estimation Backend", version="1.0.0")
 
