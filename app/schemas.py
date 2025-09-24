@@ -1,15 +1,15 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 
-# ----- Item Category -----
-class ItemCategoryBase(BaseModel):
+# ----- Division -----
+class DivisionBase(BaseModel):
     name: str
 
-class ItemCategoryCreate(ItemCategoryBase):
+class DivisionCreate(DivisionBase):
     pass
 
-class ItemCategory(ItemCategoryBase):
-    category_id: int
+class Division(DivisionBase):
+    division_id: int
     class Config:
         from_attributes = True
 
@@ -19,14 +19,20 @@ class ItemBase(BaseModel):
     item_description: str
     unit: Optional[str] = None
     rate: Optional[float] = Field(default=None, description="Default rate per unit")
-    category_id: int
+    division_id: int
 
 class ItemCreate(ItemBase):
     pass
 
+class ItemUpdate(ItemBase):
+    item_code: Optional[str] = None
+    item_description: Optional[str] = None
+    division_id: Optional[int] = None
+
+
 class Item(ItemBase):
     item_id: int
-    category: Optional[ItemCategory] = None
+    division: Optional[Division] = None
     class Config:
         from_attributes = True
 
@@ -34,6 +40,12 @@ class Item(ItemBase):
 class ProjectBase(BaseModel):
     project_name: str
     client_name: Optional[str] = None
+
+    @validator('project_name')
+    def project_name_must_not_be_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Project name cannot be empty')
+        return v
 
 class ProjectCreate(ProjectBase):
     pass

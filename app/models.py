@@ -2,23 +2,23 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, Text
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .database import Base
 
-class ItemCategory(Base):
-    __tablename__ = "item_categories"
-    category_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+class Division(Base):
+    __tablename__ = "divisions"
+    division_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
-    items = relationship("Item", back_populates="category", cascade="all, delete-orphan")
+    items = relationship("Item", back_populates="division", cascade="all, delete-orphan")
 
 class Item(Base):
     __tablename__ = "items"
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    category_id: Mapped[int] = mapped_column(ForeignKey("item_categories.category_id"), nullable=False)
+    division_id: Mapped[int] = mapped_column(ForeignKey("divisions.division_id"), nullable=False)
     item_code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     item_description: Mapped[str] = mapped_column(Text, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rate: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
 
-    category = relationship("ItemCategory", back_populates="items")
+    division = relationship("Division", back_populates="items")
     # historical relationships from earlier design not strictly required
     estimation_lines = relationship("EstimationLine", back_populates="item")
 

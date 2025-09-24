@@ -4,7 +4,7 @@ from typing import List
 from ..database import SessionLocal
 from .. import schemas, crud
 
-router = APIRouter(prefix="/items", tags=["Items & Categories"])
+router = APIRouter(prefix="/items", tags=["Items & Divisions"])
 
 def get_db():
     db = SessionLocal()
@@ -13,13 +13,13 @@ def get_db():
     finally:
         db.close()
 
-@router.post("/categories", response_model=schemas.ItemCategory)
-def create_category(payload: schemas.ItemCategoryCreate, db: Session = Depends(get_db)):
-    return crud.create_category(db, payload)
+@router.post("/divisions", response_model=schemas.Division)
+def create_division(payload: schemas.DivisionCreate, db: Session = Depends(get_db)):
+    return crud.create_division(db, payload)
 
-@router.get("/categories", response_model=List[schemas.ItemCategory])
-def list_categories(db: Session = Depends(get_db)):
-    return crud.list_categories(db)
+@router.get("/divisions", response_model=List[schemas.Division])
+def list_divisions(db: Session = Depends(get_db)):
+    return crud.list_divisions(db)
 
 @router.post("", response_model=schemas.Item)
 def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
@@ -27,4 +27,24 @@ def create_item(payload: schemas.ItemCreate, db: Session = Depends(get_db)):
 
 @router.get("", response_model=List[schemas.Item])
 def list_items(db: Session = Depends(get_db)):
-    return crud.list_items(db)
+    try:
+        return crud.list_items(db)
+    except Exception as e:
+        print(f"Error in list_items: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@router.put("/{item_id}", response_model=schemas.Item)
+
+def update_item(item_id: int, payload: schemas.ItemUpdate, db: Session = Depends(get_db)):
+    item = crud.update_item(db, item_id, payload)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+@router.delete("/{item_id}", response_model=schemas.Item)
+
+def delete_item(item_id: int, db: Session = Depends(get_db)):
+    item = crud.delete_item(db, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item

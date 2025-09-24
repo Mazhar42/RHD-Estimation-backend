@@ -2,15 +2,15 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
 
-def create_category(db: Session, data: schemas.ItemCategoryCreate):
-    obj = models.ItemCategory(**data.model_dump())
+def create_division(db: Session, data: schemas.DivisionCreate):
+    obj = models.Division(**data.model_dump())
     db.add(obj)
     db.commit()
     db.refresh(obj)
     return obj
 
-def list_categories(db: Session):
-    return db.execute(select(models.ItemCategory)).scalars().all()
+def list_divisions(db: Session):
+    return db.execute(select(models.Division)).scalars().all()
 
 def create_item(db: Session, data: schemas.ItemCreate):
     obj = models.Item(**data.model_dump())
@@ -20,8 +20,27 @@ def create_item(db: Session, data: schemas.ItemCreate):
     return obj
 
 def list_items(db: Session):
-    stmt = select(models.Item).options(joinedload(models.Item.category))
+    stmt = select(models.Item).options(joinedload(models.Item.division))
     return db.execute(stmt).scalars().all()
+
+def update_item(db: Session, item_id: int, data: schemas.ItemUpdate):
+    item = db.get(models.Item, item_id)
+    if not item:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(item, key, value)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+def delete_item(db: Session, item_id: int):
+    item = db.get(models.Item, item_id)
+    if not item:
+        return None
+    db.delete(item)
+    db.commit()
+    return item
 
 def create_project(db: Session, data: schemas.ProjectCreate):
     obj = models.Project(**data.model_dump())
@@ -29,6 +48,14 @@ def create_project(db: Session, data: schemas.ProjectCreate):
     db.commit()
     db.refresh(obj)
     return obj
+
+def delete_project(db: Session, project_id: int):
+    project = db.get(models.Project, project_id)
+    if not project:
+        return None
+    db.delete(project)
+    db.commit()
+    return project
 
 def list_projects(db: Session):
     return db.execute(select(models.Project)).scalars().all()
@@ -39,6 +66,14 @@ def create_estimation(db: Session, project_id: int, data: schemas.EstimationCrea
     db.commit()
     db.refresh(obj)
     return obj
+
+def delete_estimation(db: Session, estimation_id: int):
+    estimation = db.get(models.Estimation, estimation_id)
+    if not estimation:
+        return None
+    db.delete(estimation)
+    db.commit()
+    return estimation
 
 def list_estimations_for_project(db: Session, project_id: int):
     stmt = select(models.Estimation).where(models.Estimation.project_id == project_id)
@@ -115,7 +150,7 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
 
 def list_estimation_lines(db: Session, estimation_id: int):
     stmt = select(models.EstimationLine).where(models.EstimationLine.estimation_id == estimation_id).options(
-        joinedload(models.EstimationLine.item).joinedload(models.Item.category)
+        joinedload(models.EstimationLine.item).joinedload(models.Item.division)
     )
     return db.execute(stmt).scalars().all()
 

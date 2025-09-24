@@ -33,6 +33,13 @@ def update_line(line_id: int, payload: schemas.EstimationLineCreate, db: Session
 def list_lines(estimation_id: int, db: Session = Depends(get_db)):
     return crud.list_estimation_lines(db, estimation_id)
 
+@router.delete("/{estimation_id}", response_model=schemas.Estimation)
+def delete_estimation(estimation_id: int, db: Session = Depends(get_db)):
+    estimation = crud.delete_estimation(db, estimation_id)
+    if not estimation:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    return estimation
+
 @router.get("/{estimation_id}/total")
 def get_total(estimation_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     total = crud.estimation_total(db, estimation_id)
