@@ -11,6 +11,9 @@ app = FastAPI(title="Estimation Backend", version="1.0.0")
 
 @app.on_event("startup")
 def startup_event():
+    import os
+    Base.metadata.create_all(bind=engine)
+    print("Database file path:", os.path.abspath("estimation.db"))
     db = SessionLocal()
     # Check if divisions table is empty
     if db.query(Division).count() == 0:
