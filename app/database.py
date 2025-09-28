@@ -20,3 +20,5 @@ else:
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+print(f"Using database at {DATABASE_URL}")
