@@ -9,6 +9,14 @@ from .models import Item, Division
 
 app = FastAPI(title="Estimation Backend", version="1.0.0")
 
+@app.on_event("startup")
+def startup_event():
+    db = SessionLocal()
+    # Check if divisions table is empty
+    if db.query(Division).count() == 0:
+        seed_data()
+    db.close()
+
 # CORS
 origins = ["*"]
 
