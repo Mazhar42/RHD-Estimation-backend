@@ -5,17 +5,16 @@ from .routers import items, projects, estimations, divisions
 from .seed import seed_data
 from .models import Item, Division
 
+# Create tables
+Base.metadata.create_all(bind=engine)
 
+# Seed data if tables are empty
+db = SessionLocal()
+if not db.query(Item).count() and not db.query(Division).count():
+    seed_data()
+db.close()
 
 app = FastAPI(title="Estimation Backend", version="1.0.0")
-
-@app.on_event("startup")
-def startup_event():
-    db = SessionLocal()
-    # Check if divisions table is empty
-    if db.query(Division).count() == 0:
-        seed_data()
-    db.close()
 
 # CORS
 origins = ["*"]
