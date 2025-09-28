@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .database import Base, engine, SessionLocal
-from .routers import items, projects, estimations
+from .routers import items, projects, estimations, divisions
 from .seed import seed_data
 from .models import Item, Division
 
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(items.router)
 app.include_router(projects.router)
 app.include_router(estimations.router)
+app.include_router(divisions.router)
 
 @app.get("/health")
 def health():

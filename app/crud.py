@@ -2,6 +2,9 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
 
+def get_divisions(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Division).offset(skip).limit(limit).all()
+
 def create_division(db: Session, data: schemas.DivisionCreate):
     obj = models.Division(**data.model_dump())
     db.add(obj)
