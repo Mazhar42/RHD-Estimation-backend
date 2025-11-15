@@ -141,7 +141,7 @@ def list_estimations_for_project(db: Session, project_id: int):
     return db.execute(stmt).scalars().all()
 
 def get_item_rate(db: Session, item_id: int):
-    rate = db.execute(select(models.Item.rate).where(models.Item.item_id == item_id)).scalar_one()
+    rate = db.execute(select(models.Item.rate).where(models.Item.item_id == item_id)).scalar_one_or_none()
     return float(rate) if rate is not None else None
 
 def calculate_qty(no_of_units: int | None, length, width, thickness, quantity):

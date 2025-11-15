@@ -13,12 +13,18 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Estimation Backend", version="1.0.0")
 
-# CORS
-origins = ["*"]
+# CORS: cannot use "*" when allow_credentials=True.
+# Explicitly list frontend origins and allow Netlify deploy previews via regex.
+origins = [
+    "https://rhd-estimation.netlify.app",
+    "http://localhost:5175",
+    "http://localhost:5173",
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=r"https://.*\.netlify\.app",  # allow Netlify preview sites
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

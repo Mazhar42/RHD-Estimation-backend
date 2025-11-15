@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from ..database import SessionLocal
-from .. import schemas, crud
+from .. import schemas, crud, models
 
 router = APIRouter(prefix="/estimations", tags=["Estimation Lines"])
 
@@ -15,6 +15,12 @@ def get_db():
 
 @router.post("/{estimation_id}/lines", response_model=schemas.EstimationLine)
 def add_line(estimation_id: int, payload: schemas.EstimationLineCreate, db: Session = Depends(get_db)):
+    est = db.get(models.Estimation, estimation_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    item = db.get(models.Item, payload.item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
     return crud.create_estimation_line(db, estimation_id, payload)
 
 @router.delete("/lines")
