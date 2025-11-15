@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# exit on error
-set -o errexit
+set -euo pipefail
 
+# Ensure we run from backend directory
+cd "$(dirname "$0")"
+
+echo "Installing Python dependencies..."
+python --version || true
+pip install --upgrade pip
 pip install -r requirements.txt
 
-alembic upgrade head
+echo "Build steps completed."

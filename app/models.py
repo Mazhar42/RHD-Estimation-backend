@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, Text, UniqueConstraint
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .database import Base
 
@@ -13,14 +13,17 @@ class Item(Base):
     __tablename__ = "items"
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     division_id: Mapped[int] = mapped_column(ForeignKey("divisions.division_id"), nullable=False)
-    item_code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    item_code: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
     item_description: Mapped[str] = mapped_column(Text, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rate: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
+    region: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Default")
 
     division = relationship("Division", back_populates="items")
     # historical relationships from earlier design not strictly required
     estimation_lines = relationship("EstimationLine", back_populates="item")
+
+    __table_args__ = (UniqueConstraint("item_code", "region", name="uq_item_code_region"),)
 
 class Project(Base):
     __tablename__ = "projects"

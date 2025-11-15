@@ -2,6 +2,40 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
 
+def get_division_by_name(db: Session, name: str):
+    return db.query(models.Division).filter(models.Division.name == name).first()
+
+def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
+    # Find or create division
+    division = get_division_by_name(db, item_data.division)
+    if not division:
+        division = create_division(db, schemas.DivisionCreate(name=item_data.division))
+    
+    # Check if item already exists for this item_code and region
+    existing_item = get_item_by_code_and_region(db, item_data.item_code, item_data.region)
+
+    if existing_item:
+        # Update existing item
+        existing_item.item_description = item_data.item_description
+        existing_item.unit = item_data.unit
+        existing_item.rate = item_data.rate
+        existing_item.division_id = division.division_id
+        db.add(existing_item)
+        db.commit()
+        db.refresh(existing_item)
+        return existing_item
+    else:
+        # Create new item
+        item_create_data = schemas.ItemCreate(
+            division_id=division.division_id,
+            item_code=item_data.item_code,
+            item_description=item_data.item_description,
+            unit=item_data.unit,
+            rate=item_data.rate,
+            region=item_data.region
+        )
+        return create_item(db, item_create_data)
+
 def get_divisions(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Division).offset(skip).limit(limit).all()
 
@@ -14,6 +48,23 @@ def create_division(db: Session, data: schemas.DivisionCreate):
 
 def list_divisions(db: Session):
     return db.execute(select(models.Division)).scalars().all()
+
+def delete_division(db: Session, division_id: int):
+    division = db.get(models.Division, division_id)
+    if not division:
+        return None
+    db.delete(division)
+    db.commit()
+    return division
+
+def get_items(db: Session, region: str | None = None, skip: int = 0, limit: int = 100):
+    query = db.query(models.Item).options(joinedload(models.Item.division))
+    if region:
+        query = query.filter(models.Item.region == region)
+    return query.offset(skip).limit(limit).all()
+
+def get_item_by_code_and_region(db: Session, item_code: str, region: str):
+    return db.query(models.Item).filter(models.Item.item_code == item_code, models.Item.region == region).first()
 
 def create_item(db: Session, data: schemas.ItemCreate):
     obj = models.Item(**data.model_dump())
@@ -44,6 +95,13 @@ def delete_item(db: Session, item_id: int):
     db.delete(item)
     db.commit()
     return item
+
+def delete_all_items(db: Session) -> int:
+    """Delete all items from the item master. Returns number of rows deleted."""
+    stmt = models.Item.__table__.delete()
+    result = db.execute(stmt)
+    db.commit()
+    return result.rowcount
 
 def create_project(db: Session, data: schemas.ProjectCreate):
     obj = models.Project(**data.model_dump())

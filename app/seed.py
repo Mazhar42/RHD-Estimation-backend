@@ -1,470 +1,71 @@
-import json
 import os
 import sys
+from typing import List, Dict
 
-# Adjust the path to allow imports from the parent directory
+# Ensure we can import from app package when running directly
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import SessionLocal
-from app.models import Item, Division
+from app import crud, schemas
+from app.data_parser import parse_rates, parse_rates_csv
 
-# Provided data
-data = [
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/01/01",
-    "item_description": "Maintenance and protection of Traffic",
-    "unit": "L S",
-    "rate": 124275.34
-  },
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/02/04",
-    "item_description": "Provision, maintence and removal of sign boards",
-    "unit": "L S",
-    "rate": 180881.15
-  },
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/02/05",
-    "item_description": "Provision and maintenance of Survey Equipment",
-    "unit": "Month",
-    "rate": 25116.27
-  },
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/02/07",
-    "item_description": "Progress photographs",
-    "unit": "Month",
-    "rate": 665.58
-  },
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/03/01",
-    "item_description": "Provide and removal of site laboratory & equipment",
-    "unit": "L/S",
-    "rate": 243958.74
-  },
-  {
-    "division": "General & Site Facilities",
-    "item_code": "01/03/02",
-    "item_description": "Maintain site laboratory.",
-    "unit": "Month",
-    "rate": 6027.9
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/02/02",
-    "item_description": "Roadway Excavation in suitable Soil",
-    "unit": "Cum",
-    "rate": 118.32
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/05/01",
-    "item_description": "Excavation and backfill for structure",
-    "unit": "Cum",
-    "rate": 409.39
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/05/03",
-    "item_description": "Sand backfill for structure",
-    "unit": "Cum",
-    "rate": 1333.92
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/06/02",
-    "item_description": "Embankment fill from borrow pit in contractor's arranged land",
-    "unit": "Cum",
-    "rate": 178.88
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/07/02",
-    "item_description": "Preparation of sub grade 450 mm depth",
-    "unit": "Sqm",
-    "rate": 32.6
-  },
-  {
-    "division": "Earth Work",
-    "item_code": "02/08/01",
-    "item_description": "Improved Sub-grade",
-    "unit": "Cum",
-    "rate": 1111.6
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/02/01(a)",
-    "item_description": "Sub-Base",
-    "unit": "Cum",
-    "rate": 4569.9
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/03/01(a)",
-    "item_description": "Aggregate Base Type-I",
-    "unit": "Cum",
-    "rate": 8866.92
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/03/02(a)",
-    "item_description": "Aggregate Base Type-II",
-    "unit": "Cum",
-    "rate": 4994.37
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/06/01a",
-    "item_description": "Bituminous Prime Coat (Plant Placed)",
-    "unit": "Sqm",
-    "rate": 118.91
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/07/01a",
-    "item_description": "Bituminous Tack Coat (Plant work)",
-    "unit": "Sqm",
-    "rate": 53.3
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/10/01(b)",
-    "item_description": "Dense Bituminous Surfacing-Base Course (Plant Method) (Bitumen Grade 60/70)",
-    "unit": "Cum",
-    "rate": 24792.02
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/10/02(b)",
-    "item_description": "Dense Bituminous Surfacing (Plant Method) (Bitumen Grade 60/70)",
-    "unit": "Cum",
-    "rate": 26100.83
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/13/01(a)",
-    "item_description": "Brick on End Edging (1st class)",
-    "unit": "Lin. M",
-    "rate": 214.11
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/13/02(a)",
-    "item_description": "Single Layer Brick Flat Soling i/c 75mm thick compacted sand cushion (1st class)",
-    "unit": "Sqm",
-    "rate": 601.94
-  },
-  {
-    "division": "Pavement Work",
-    "item_code": "03/13/03(a)",
-    "item_description": "Herring Bond Brick Pavement i/c 12mm sand cushion (1st class)",
-    "unit": "Sqm",
-    "rate": 843.65
-  },
-  {
-    "division": "Foundation Work",
-    "item_code": "04/01/01c",
-    "item_description": "Bored cast in place piles(dia 750mm)",
-    "unit": "Lin. M",
-    "rate": 10244.06
-  },
-  {
-    "division": "Foundation Work",
-    "item_code": "04/01/04",
-    "item_description": "High Yield Deformed  Steel Reinforcing bars (Grade 60 )",
-    "unit": "M Ton",
-    "rate": 97903.25
-  },
-  {
-    "division": "Foundation Work",
-    "item_code": "04/04/01b",
-    "item_description": "Load Test on cast in place piles (For 100 Ton)",
-    "unit": "Number",
-    "rate": 290557.67
-  },
-  {
-    "division": "Foundation Work",
-    "item_code": "04/04/01c",
-    "item_description": "Load Test on cast in place piles (For 200 Ton)",
-    "unit": "Number",
-    "rate": 290557.67
-  },
-  {
-    "division": "Foundation Work",
-    "item_code": "04/07/05",
-    "item_description": "Sand Filling",
-    "unit": "Cum",
-    "rate": 1334.3
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/01",
-    "item_description": "Single Layer Brick Flat soling",
-    "unit": "Sqm",
-    "rate": 532.84
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02a",
-    "item_description": "Concrete class as detailed on drawings (Class 10)(Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 11539.14
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02b",
-    "item_description": "Concrete class - 20 (Foundation) (Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 18405.24
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02c",
-    "item_description": "Concrete class - 20 (Vertical member col. Pier, abutment/wing wall, culvert etc.) (Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 20843.58
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02f",
-    "item_description": "Concrete class - 20 (rail & post.)(Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 0
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02g",
-    "item_description": "Concrete class-25 (Foundation)(Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 17989.3
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02h",
-    "item_description": "Concrete class - 25 (Vertical member of column, pier, abutment /wing wall, culvert etc.)(Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 20968.63
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02i",
-    "item_description": "Concrete class - 25 (Girder, cross girder, diaphram, beam etc.)(Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 23541.45
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02k",
-    "item_description": "Concrete class - 35 (Deck slab, side walk, wheel guard, curb etc. (Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 0
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02l",
-    "item_description": "Concrete class - 35 (Deck slab (Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 30266.84
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/01/02m",
-    "item_description": "Concrete class - 40 (Pre-stressed Girder.) (Concrete Mixer)",
-    "unit": "Cum",
-    "rate": 30748.19
-  },
-  {
-    "division": "Structures",
-    "item__code": "05/02/02",
-    "item_description": "High yield reinforcement bars ( Grade 60 )",
-    "unit": "M Ton",
-    "rate": 96459.06
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/03/01",
-    "item_description": "Prestressing Wire or Strand",
-    "unit": "M Ton",
-    "rate": 279403.64
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/05/01",
-    "item_description": "New and Extended Brick work",
-    "unit": "Cum",
-    "rate": 9337.91
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/05/02",
-    ".item_description": "Brick drainage layer",
-    "unit": "Cum",
-    "rate": 5839.53
-  },
-  {
-    "division": "Structures",
-    "item_code": "Pwd: 16.6",
-    "item_description": "Painting to door and window frames and shutters.",
-    "unit": "Sqm",
-    "rate": 175.81
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/08/01",
-    "item_description": "Expansion joint complete as detailed on the drawing in the location described in the BoQ.",
-    "unit": "Lin. m",
-    "rate": 10160.35
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/13/01a",
-    "item_description": "Neoprene Rubber Bearing or Elastomeric Bearing supplying & fitting fixing, etc.",
-    "unit": "Nos",
-    "rate": 19883.71
-  },
-  {
-    "division": "Structures",
-    "item_code": "05/16/01",
-    "item_description": "Dismantling of deck slab, thickness 175mm.",
-    "unit": "Sqm",
-    "rate": 6757
-  },
-  {
-    "division": "Incidental",
-    "item_code": "06/01/02",
-    "item_description": "Concrete slope protection",
-    "unit": "Sqm",
-    "rate": 1879.85
-  },
-  {
-    "division": "Incidental",
-    "item_code": "6/2/1",
-    "item_description": "Reinforced concrete culvert pipe class A",
-    "unit": "Lin. m",
-    "rate": 5990
-  },
-  {
-    "division": "Incidental",
-    "item_code": "06/05/01",
-    "item_description": "Road Marking- Thermoplastic Material (indicate if screed or spray application)",
-    "unit": "Sqm",
-    "rate": 1019.54
-  },
-  {
-    "division": "Incidental",
-    "item_code": "06/12/01",
-    "item_description": "Geotextile Filter Fabric (as detailed on the drawing)",
-    "unit": "Sqm",
-    "rate": 215.21
-  },
-  {
-    "division": "Incidental",
-    "item_code": "06/15/01",
-    "item_description": "Concrete Guide Post (1.6m long, 200mm dia)",
-    "unit": "Nos",
-    "rate": 2515
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item No-01 BWDB 40-650-30",
-    "item_description": "Supply and placing sand as filter (F.M 1 to 1.5)",
-    "unit": "Cum",
-    "rate": 967.53
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item No-02 BWDB 40-610-30",
-    "item_description": "Supply and placing Jhama Khoa as filter (Size 20mm to 5mm)",
-    "unit": "Cum",
-    "rate": 3630.22
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item No-03",
-    "item_description": "Providing 50 mm U-Pvc Pipe for weep hole",
-    "unit": "Lin. M",
-    "rate": 22.6
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item-04 (No-8.7, PWD Sch.-2018)",
-    "item_description": "Providing bearing joint fixed or free with 250x375x10 mm M.S. (Grade - A36) shoe plate...",
-    "unit": "Nos",
-    "rate": 100
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item-05 (No-26.36.01 PWD Sch.-2018)",
-    "item_description": "12.5 mm dia GI Pipe with wall thickness 2.65 mm...",
-    "unit": "Metre",
-    "rate": 101
-  },
-  {
-    "division": "Incidental",
-    "item_code": "Special Item- 06 (No-26.38.09 PWD Sch.2018)",
-    "item_description": "100 mm dia G.I Pipee with wall thickness 5.40 mm...",
-    "unit": "Metre",
-    "rate": 2520
-  }
+
+DEFAULT_FILES = [
+    # Prefer backend-local CSV
+    os.path.join(os.path.dirname(__file__), "..", "Rates.csv"),
+    # Project root CSV
+    os.path.join(os.path.dirname(__file__), "..", "..", "Rates.csv"),
+    # Project root XLSX
+    os.path.join(os.path.dirname(__file__), "..", "..", "RatesExcel.xlsx"),
 ]
 
-def seed_data():
-    print("Starting to seed data...")
-    db = SessionLocal()
-    print("Database session created.")
+
+def find_input_file(cli_path: str | None = None) -> str:
+    """Return the first existing path among CLI input and defaults."""
+    if cli_path:
+        if os.path.exists(cli_path):
+            return cli_path
+        raise FileNotFoundError(f"Specified file not found: {cli_path}")
+    for p in DEFAULT_FILES:
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError("No rates file found. Expected one of: Rates.csv or RatesExcel.xlsx")
+
+
+def seed_data(input_file: str | None = None) -> int:
+    print("Starting to seed rates into items...")
+    target_file = find_input_file(input_file)
+    print(f"Using input file: {target_file}")
+
+    # Parse input file
     try:
-        division_cache = {}
-        for i, item_data in enumerate(data):
-            print(f"Processing item {i+1}/{len(data)}: {item_data.get('item_code') or item_data.get('item__code')}")
-            division_name = item_data["division"]
-            if division_name in division_cache:
-                division = division_cache[division_name]
-                print(f"Found division '{division_name}' in cache.")
-            else:
-                print(f"Querying for division '{division_name}'.")
-                division = db.query(Division).filter(Division.name == division_name).first()
-                if not division:
-                    print(f"Division '{division_name}' not found, creating new one.")
-                    division = Division(name=division_name)
-                    db.add(division)
-                    db.flush()  # Flush to get the division_id
-                    print(f"Created and flushed new division with ID: {division.division_id}")
-                else:
-                    print(f"Found division '{division_name}' in database.")
-                division_cache[division_name] = division
+        parsed: List[Dict] = parse_rates(target_file)
+    except ValueError as ve:
+        # If extension unsupported but it's CSV in disguise, fallback
+        print(f"Parser dispatch failed: {ve}. Falling back to CSV parser...")
+        parsed = parse_rates_csv(target_file)
 
-            # Handle potential malformed keys
-            item_code = item_data.get("item_code") or item_data.get("item__code") or item_data.get("item_code")
-            item_description = item_data.get("item_description") or item_data.get(".item_description")
-
-            if not item_code or not item_description:
-                print(f"Skipping item due to missing 'item_code' or 'item_description': {item_data}")
-                continue
-
-            item = Item(
-                division_id=division.division_id,
-                item_code=item_code,
-                item_description=item_description,
-                unit=item_data["unit"],
-                rate=item_data["rate"]
-            )
-            db.add(item)
-            print(f"Added item '{item_code}' to session.")
-        
-        print("Committing changes to the database...")
-        db.commit()
-        print("Commit successful.")
+    print(f"Parsed {len(parsed)} rows. Upserting into DB...")
+    db = SessionLocal()
+    items_count = 0
+    try:
+        for row in parsed:
+            # Convert dict to Pydantic and upsert
+            item_parsed = schemas.ItemParsed(**row)
+            crud.create_item_from_parsed_data(db, item_parsed)
+            items_count += 1
+        print("Seeding complete. No commit batching necessary; CRUD commits per item.")
     except Exception as e:
-        print(f"An error occurred: {e}")
-        db.rollback()
-        print("Database rollback.")
+        print(f"Error during seeding: {e}")
+        raise
     finally:
         db.close()
         print("Database session closed.")
+    return items_count
+
 
 if __name__ == "__main__":
-    seed_data()
-    print("Seeding completed!")
+    # Optional CLI arg: file path
+    cli_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    total = seed_data(cli_arg)
+    print(f"Seeding completed! Total items processed: {total}")

@@ -1,7 +1,7 @@
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict
+from typing import List, Optional
 
-# ----- Division -----
+# Division Schemas
 class DivisionBase(BaseModel):
     name: str
 
@@ -10,69 +10,61 @@ class DivisionCreate(DivisionBase):
 
 class Division(DivisionBase):
     division_id: int
-    class Config:
-        from_attributes = True
+    
+    model_config = ConfigDict(from_attributes=True)
 
-# ----- Items (Product Master) -----
+# Item Schemas
 class ItemBase(BaseModel):
     item_code: str
     item_description: str
     unit: Optional[str] = None
-    rate: Optional[float] = Field(default=None, description="Default rate per unit")
-    division_id: int
+    rate: Optional[float] = None
+    region: str
 
 class ItemCreate(ItemBase):
-    pass
+    division_id: int
 
-class ItemUpdate(ItemBase):
+class ItemUpdate(BaseModel):
     item_code: Optional[str] = None
     item_description: Optional[str] = None
+    unit: Optional[str] = None
+    rate: Optional[float] = None
+    region: Optional[str] = None
     division_id: Optional[int] = None
 
+class ItemParsed(BaseModel):
+    division: str
+    item_code: str
+    item_description: str
+    unit: Optional[str] = None
+    rate: Optional[float] = None
+    region: str
 
 class Item(ItemBase):
     item_id: int
-    division: Optional[Division] = None
-    class Config:
-        from_attributes = True
+    division_id: int
+    division: Division
 
-# ----- Projects -----
+    model_config = ConfigDict(from_attributes=True)
+
+# Project Schemas
 class ProjectBase(BaseModel):
     project_name: str
     client_name: Optional[str] = None
-
-    @validator('project_name')
-    def project_name_must_not_be_empty(cls, v):
-        if not v or not v.strip():
-            raise ValueError('Project name cannot be empty')
-        return v
 
 class ProjectCreate(ProjectBase):
     pass
 
 class Project(ProjectBase):
     project_id: int
-    class Config:
-        from_attributes = True
+    
+    model_config = ConfigDict(from_attributes=True)
 
-# ----- Estimations -----
-class EstimationBase(BaseModel):
-    estimation_name: str
-
-class EstimationCreate(EstimationBase):
-    pass
-
-class Estimation(EstimationBase):
-    estimation_id: int
-    project_id: int
-    class Config:
-        from_attributes = True
-
-# ----- Estimation Lines -----
+# Estimation Schemas
 class EstimationLineBase(BaseModel):
     item_id: int
     sub_description: Optional[str] = None
-    no_of_units: Optional[int] = 1
+    no_of_units: int = 1
     length: Optional[float] = None
     width: Optional[float] = None
     thickness: Optional[float] = None
@@ -85,14 +77,24 @@ class EstimationLine(EstimationLineBase):
     line_id: int
     estimation_id: int
     calculated_qty: Optional[float] = None
-    amount: Optional[float] = None
-    item: Optional[Item] = None
     rate: Optional[float] = None
-    class Config:
-        from_attributes = True
+    amount: Optional[float] = None
+    item: Item
 
-class EstimationWithLines(Estimation):
+    model_config = ConfigDict(from_attributes=True)
+
+class EstimationBase(BaseModel):
+    estimation_name: str
+
+class EstimationCreate(EstimationBase):
+    pass
+
+class Estimation(EstimationBase):
+    estimation_id: int
+    project_id: int
     lines: List[EstimationLine] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 class EstimationLineDelete(BaseModel):
     line_ids: List[int]
