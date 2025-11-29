@@ -2,11 +2,34 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Numeric, Text, Uniqu
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .database import Base
 
+class Organization(Base):
+    __tablename__ = "organizations"
+    org_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+
+    divisions = relationship("Division", back_populates="organization", cascade="all, delete-orphan")
+    regions = relationship("Region", back_populates="organization", cascade="all, delete-orphan")
+
+class Region(Base):
+    __tablename__ = "regions"
+    region_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.org_id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    organization = relationship("Organization", back_populates="regions")
+
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_org_region_name"),
+    )
+
 class Division(Base):
     __tablename__ = "divisions"
     division_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Link division to owning organization (startup migration will backfill to RHD)
+    organization_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.org_id"), nullable=True)
 
+    organization = relationship("Organization", back_populates="divisions")
     items = relationship("Item", back_populates="division", cascade="all, delete-orphan")
 
 class Item(Base):
@@ -18,6 +41,8 @@ class Item(Base):
     unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rate: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
     region: Mapped[str] = mapped_column(String(50), nullable=False, server_default="Default")
+    # Organization owning the rate; default to 'RHD'
+    organization: Mapped[str] = mapped_column(String(50), nullable=False, server_default="RHD")
 
     division = relationship("Division", back_populates="items")
     # historical relationships from earlier design not strictly required
@@ -57,6 +82,9 @@ class EstimationLine(Base):
     calculated_qty: Mapped[float | None] = mapped_column(Numeric(15,3), nullable=True)
     rate: Mapped[float | None] = mapped_column(Numeric(15,2), nullable=True)
     amount: Mapped[float | None] = mapped_column(Numeric(15,2), nullable=True)
+    # Optional attachment for Special Item lines
+    attachment_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    attachment_base64: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     estimation = relationship("Estimation", back_populates="lines")
     item = relationship("Item", back_populates="estimation_lines")

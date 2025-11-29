@@ -2,14 +2,32 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
 
-def get_division_by_name(db: Session, name: str):
-    return db.query(models.Division).filter(models.Division.name == name).first()
+def get_organization_by_name(db: Session, name: str):
+    return db.query(models.Organization).filter(models.Organization.name == name).first()
+
+def get_division_by_name(db: Session, name: str, organization_id: int | None = None):
+    q = db.query(models.Division).filter(models.Division.name == name)
+    if organization_id is not None:
+        q = q.filter(models.Division.organization_id == organization_id)
+    return q.first()
 
 def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
-    # Find or create division
-    division = get_division_by_name(db, item_data.division)
+    # Resolve organization
+    org_name = item_data.organization or "RHD"
+    org = get_organization_by_name(db, org_name)
+    if not org:
+        org = create_organization(db, schemas.OrganizationCreate(name=org_name))
+
+    # Ensure region exists for organization
+    if item_data.region:
+        existing_regions = list_regions_for_org(db, org.org_id)
+        if not any(r.name == item_data.region for r in existing_regions):
+            create_region(db, schemas.RegionCreate(name=item_data.region, organization_id=org.org_id))
+
+    # Find or create division scoped to organization
+    division = get_division_by_name(db, item_data.division, organization_id=org.org_id)
     if not division:
-        division = create_division(db, schemas.DivisionCreate(name=item_data.division))
+        division = create_division(db, schemas.DivisionCreate(name=item_data.division, organization_id=org.org_id))
     
     # Check if item already exists for this item_code and region
     existing_item = get_item_by_code_and_region(db, item_data.item_code, item_data.region)
@@ -32,7 +50,8 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
             item_description=item_data.item_description,
             unit=item_data.unit,
             rate=item_data.rate,
-            region=item_data.region
+            region=item_data.region,
+            organization=org.name
         )
         return create_item(db, item_create_data)
 
@@ -40,7 +59,18 @@ def get_divisions(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Division).offset(skip).limit(limit).all()
 
 def create_division(db: Session, data: schemas.DivisionCreate):
-    obj = models.Division(**data.model_dump())
+    payload = data.model_dump()
+    # Default organization to RHD if not provided
+    if payload.get("organization_id") is None:
+        # Find or create RHD organization
+        org = db.query(models.Organization).filter(models.Organization.name == "RHD").first()
+        if not org:
+            org = models.Organization(name="RHD")
+            db.add(org)
+            db.commit()
+            db.refresh(org)
+        payload["organization_id"] = org.org_id
+    obj = models.Division(**payload)
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -57,10 +87,51 @@ def delete_division(db: Session, division_id: int):
     db.commit()
     return division
 
-def get_items(db: Session, region: str | None = None, skip: int = 0, limit: int = 100):
+# ===== Organizations =====
+def create_organization(db: Session, data: schemas.OrganizationCreate):
+    obj = models.Organization(**data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+def list_organizations(db: Session):
+    return db.execute(select(models.Organization)).scalars().all()
+
+def delete_organization(db: Session, org_id: int):
+    org = db.get(models.Organization, org_id)
+    if not org:
+        return None
+    db.delete(org)
+    db.commit()
+    return org
+
+# ===== Regions (per organization) =====
+def create_region(db: Session, data: schemas.RegionCreate):
+    obj = models.Region(**data.model_dump())
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+def list_regions_for_org(db: Session, organization_id: int):
+    stmt = select(models.Region).where(models.Region.organization_id == organization_id)
+    return db.execute(stmt).scalars().all()
+
+def delete_region(db: Session, region_id: int):
+    reg = db.get(models.Region, region_id)
+    if not reg:
+        return None
+    db.delete(reg)
+    db.commit()
+    return reg
+
+def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
     query = db.query(models.Item).options(joinedload(models.Item.division))
     if region:
         query = query.filter(models.Item.region == region)
+    if organization:
+        query = query.filter(models.Item.organization == organization)
     return query.offset(skip).limit(limit).all()
 
 def get_item_by_code_and_region(db: Session, item_code: str, region: str):
@@ -121,6 +192,17 @@ def delete_project(db: Session, project_id: int):
 def list_projects(db: Session):
     return db.execute(select(models.Project)).scalars().all()
 
+def update_project(db: Session, project_id: int, data: schemas.ProjectUpdate):
+    project = db.get(models.Project, project_id)
+    if not project:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(project, key, value)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
 def create_estimation(db: Session, project_id: int, data: schemas.EstimationCreate):
     obj = models.Estimation(project_id=project_id, **data.model_dump())
     db.add(obj)
@@ -139,6 +221,17 @@ def delete_estimation(db: Session, estimation_id: int):
 def list_estimations_for_project(db: Session, project_id: int):
     stmt = select(models.Estimation).where(models.Estimation.project_id == project_id)
     return db.execute(stmt).scalars().all()
+
+def update_estimation(db: Session, estimation_id: int, data: schemas.EstimationUpdate):
+    estimation = db.get(models.Estimation, estimation_id)
+    if not estimation:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(estimation, key, value)
+    db.add(estimation)
+    db.commit()
+    db.refresh(estimation)
+    return estimation
 
 def get_item_rate(db: Session, item_id: int):
     rate = db.execute(select(models.Item.rate).where(models.Item.item_id == item_id)).scalar_one_or_none()
@@ -171,7 +264,9 @@ def create_estimation_line(db: Session, estimation_id: int, data: schemas.Estima
         quantity=data.quantity,
         calculated_qty=calc_qty,
         rate=line_rate,
-        amount=amount
+        amount=amount,
+        attachment_name=data.attachment_name,
+        attachment_base64=data.attachment_base64,
     )
     db.add(obj)
     db.commit()
@@ -197,6 +292,9 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
     line.width = data.width
     line.thickness = data.thickness
     line.quantity = data.quantity
+    # Update attachment fields if provided
+    line.attachment_name = data.attachment_name
+    line.attachment_base64 = data.attachment_base64
 
     # Recalculate based on potentially new dimensions
     line.calculated_qty = calculate_qty(line.no_of_units, line.length, line.width, line.thickness, line.quantity)

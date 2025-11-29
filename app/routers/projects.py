@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from ..database import SessionLocal
@@ -31,6 +31,13 @@ def list_projects(db: Session = Depends(get_db)):
     except Exception as e:
         print(f"Error in list_projects: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@router.patch("/{project_id}", response_model=schemas.Project)
+def update_project(project_id: int, payload: schemas.ProjectUpdate, db: Session = Depends(get_db)):
+    updated = crud.update_project(db, project_id, payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return updated
 
 @router.post("/{project_id}/estimations", response_model=schemas.Estimation)
 def create_estimation(project_id: int, payload: schemas.EstimationCreate, db: Session = Depends(get_db)):

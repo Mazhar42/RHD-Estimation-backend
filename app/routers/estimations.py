@@ -50,3 +50,10 @@ def delete_estimation(estimation_id: int, db: Session = Depends(get_db)):
 def get_total(estimation_id: int, db: Session = Depends(get_db)) -> Dict[str, Any]:
     total = crud.estimation_total(db, estimation_id)
     return {"estimation_id": estimation_id, "grand_total": total}
+
+@router.patch("/{estimation_id}", response_model=schemas.Estimation)
+def update_estimation(estimation_id: int, payload: schemas.EstimationUpdate, db: Session = Depends(get_db)):
+    updated = crud.update_estimation(db, estimation_id, payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    return updated
