@@ -35,6 +35,19 @@ def delete_organization(org_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Organization not found")
     return org
 
+@router.patch("/{org_id}", response_model=schemas.Organization)
+def update_organization(org_id: int, payload: schemas.OrganizationUpdate, db: Session = Depends(get_db)):
+    try:
+        updated = crud.update_organization(db, org_id, payload)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return updated
+    except Exception as e:
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(e, IntegrityError):
+            raise HTTPException(status_code=409, detail="Organization name already exists")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 # ---- Regions per Organization ----
 @router.get("/{org_id}/regions", response_model=list[schemas.Region])
 def list_regions(org_id: int, db: Session = Depends(get_db)):
@@ -59,3 +72,16 @@ def delete_region(region_id: int, db: Session = Depends(get_db)):
     if not reg:
         raise HTTPException(status_code=404, detail="Region not found")
     return reg
+
+@router.patch("/regions/{region_id}", response_model=schemas.Region)
+def update_region(region_id: int, payload: schemas.RegionUpdate, db: Session = Depends(get_db)):
+    try:
+        updated = crud.update_region(db, region_id, payload)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Region not found")
+        return updated
+    except Exception as e:
+        from sqlalchemy.exc import IntegrityError
+        if isinstance(e, IntegrityError):
+            raise HTTPException(status_code=409, detail="Region already exists for this organization")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

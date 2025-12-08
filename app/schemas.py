@@ -27,6 +27,9 @@ class Organization(OrganizationBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class OrganizationUpdate(BaseModel):
+    name: str | None = None
+
 # Region Schemas
 class RegionBase(BaseModel):
     name: str
@@ -39,6 +42,9 @@ class Region(RegionBase):
     organization_id: int
 
     model_config = ConfigDict(from_attributes=True)
+
+class RegionUpdate(BaseModel):
+    name: str | None = None
 
 # Item Schemas
 class ItemBase(BaseModel):

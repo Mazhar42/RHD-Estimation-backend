@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
+from sqlalchemy.exc import IntegrityError
 
 def get_organization_by_name(db: Session, name: str):
     return db.query(models.Organization).filter(models.Organization.name == name).first()
@@ -24,10 +25,15 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
         if not any(r.name == item_data.region for r in existing_regions):
             create_region(db, schemas.RegionCreate(name=item_data.region, organization_id=org.org_id))
 
-    # Find or create division scoped to organization
-    division = get_division_by_name(db, item_data.division, organization_id=org.org_id)
+    # Divisions are global by name (unique); prefer name-only lookup to avoid duplicates
+    division = get_division_by_name(db, item_data.division)
     if not division:
-        division = create_division(db, schemas.DivisionCreate(name=item_data.division, organization_id=org.org_id))
+        try:
+            division = create_division(db, schemas.DivisionCreate(name=item_data.division, organization_id=org.org_id))
+        except IntegrityError:
+            # Another transaction may have created the same division concurrently
+            db.rollback()
+            division = get_division_by_name(db, item_data.division)
     
     # Check if item already exists for this item_code and region
     existing_item = get_item_by_code_and_region(db, item_data.item_code, item_data.region)
@@ -106,6 +112,21 @@ def delete_organization(db: Session, org_id: int):
     db.commit()
     return org
 
+def update_organization(db: Session, org_id: int, data: schemas.OrganizationUpdate):
+    obj = db.get(models.Organization, org_id)
+    if not obj:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(obj, key, value)
+    db.add(obj)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(obj)
+    return obj
+
 # ===== Regions (per organization) =====
 def create_region(db: Session, data: schemas.RegionCreate):
     obj = models.Region(**data.model_dump())
@@ -125,6 +146,21 @@ def delete_region(db: Session, region_id: int):
     db.delete(reg)
     db.commit()
     return reg
+
+def update_region(db: Session, region_id: int, data: schemas.RegionUpdate):
+    obj = db.get(models.Region, region_id)
+    if not obj:
+        return None
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(obj, key, value)
+    db.add(obj)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(obj)
+    return obj
 
 def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
     query = db.query(models.Item).options(joinedload(models.Item.division))
