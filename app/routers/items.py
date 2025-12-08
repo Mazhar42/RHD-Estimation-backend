@@ -303,6 +303,10 @@ def import_items(
             count += 1
         except Exception as e:
             # Continue on errors; collect stats
+            try:
+                db.rollback()
+            except Exception:
+                pass
             print(f"Import error for row {row.get('item_code')}: {e}")
 
     return {"message": f"Import {mode} completed", "processed": count}

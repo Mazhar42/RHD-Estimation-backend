@@ -36,7 +36,7 @@ class Item(Base):
     __tablename__ = "items"
     item_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     division_id: Mapped[int] = mapped_column(ForeignKey("divisions.division_id"), nullable=False)
-    item_code: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    item_code: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     item_description: Mapped[str] = mapped_column(Text, nullable=False)
     unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     rate: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)

@@ -54,6 +54,16 @@ try:
             rhd_id_val = rhd_id.scalar() if rhd_id else None
             if rhd_id_val is not None:
                 conn.execute(text(f"UPDATE divisions SET organization_id = {int(rhd_id_val)} WHERE organization_id IS NULL"))
+
+    # Ensure items.item_code can hold longer codes on PostgreSQL
+    # For SQLite, declared lengths are not enforced; no change required
+    try:
+        if engine.dialect.name == 'postgresql':
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE items ALTER COLUMN item_code TYPE VARCHAR(255)"))
+    except Exception:
+        # Non-fatal: skip if column already migrated or DB does not permit
+        pass
 except Exception:
     # Avoid blocking startup; backend continues even if inspection fails
     pass
