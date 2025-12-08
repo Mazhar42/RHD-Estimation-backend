@@ -43,8 +43,8 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
             db.rollback()
             division = get_division_by_name(db, item_data.division)
     
-    # Check if item already exists for this item_code and region
-    existing_item = get_item_by_code_and_region(db, item_data.item_code, item_data.region)
+    # Check if item already exists for this item_code, region, and organization
+    existing_item = get_item_by_code_region_org(db, item_data.item_code, item_data.region, org.name)
 
     if existing_item:
         # Update existing item
@@ -52,6 +52,8 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
         existing_item.unit = item_data.unit
         existing_item.rate = item_data.rate
         existing_item.division_id = division.division_id
+        # Keep organization aligned to owning org
+        existing_item.organization = org.name
         db.add(existing_item)
         db.commit()
         db.refresh(existing_item)
@@ -178,8 +180,16 @@ def get_items(db: Session, region: str | None = None, organization: str | None =
         query = query.filter(models.Item.organization == organization)
     return query.offset(skip).limit(limit).all()
 
-def get_item_by_code_and_region(db: Session, item_code: str, region: str):
-    return db.query(models.Item).filter(models.Item.item_code == item_code, models.Item.region == region).first()
+def get_item_by_code_region_org(db: Session, item_code: str, region: str, organization: str):
+    return (
+        db.query(models.Item)
+        .filter(
+            models.Item.item_code == item_code,
+            models.Item.region == region,
+            models.Item.organization == organization,
+        )
+        .first()
+    )
 
 def create_item(db: Session, data: schemas.ItemCreate):
     obj = models.Item(**data.model_dump())

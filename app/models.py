@@ -48,7 +48,9 @@ class Item(Base):
     # historical relationships from earlier design not strictly required
     estimation_lines = relationship("EstimationLine", back_populates="item")
 
-    __table_args__ = (UniqueConstraint("item_code", "region", name="uq_item_code_region"),)
+    __table_args__ = (
+        UniqueConstraint("item_code", "region", "organization", name="uq_item_code_region_org"),
+    )
 
 class Project(Base):
     __tablename__ = "projects"

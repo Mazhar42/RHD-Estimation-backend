@@ -104,10 +104,10 @@ def export_items_csv(db: Session = Depends(get_db)):
     """
     items = crud.list_items(db)
 
-    # Map items by (division_id, item_code) to pivot region rates
+    # Map items by (division_id, item_code, organization) to pivot region rates
     grouped: dict[tuple, dict] = {}
     for it in items:
-        key = (it.division_id, it.item_code)
+        key = (it.division_id, it.item_code, (getattr(it, "organization", None) or "RHD"))
         if key not in grouped:
             grouped[key] = {
                 "item_code": it.item_code,
@@ -180,7 +180,7 @@ def export_items_xlsx(db: Session = Depends(get_db)):
     # Pivot grouping
     grouped: dict[tuple, dict] = {}
     for it in items:
-        key = (it.division_id, it.item_code)
+        key = (it.division_id, it.item_code, (getattr(it, "organization", None) or "RHD"))
         if key not in grouped:
             grouped[key] = {
                 "item_code": it.item_code,

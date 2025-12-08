@@ -61,6 +61,15 @@ try:
         if engine.dialect.name == 'postgresql':
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE items ALTER COLUMN item_code TYPE VARCHAR(255)"))
+                # Adjust uniqueness: make items unique per item_code + region + organization
+                # Drop old constraint if present; then create a unique index across 3 columns
+                try:
+                    conn.execute(text("ALTER TABLE items DROP CONSTRAINT IF EXISTS uq_item_code_region"))
+                except Exception:
+                    pass
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_item_code_region_org_idx ON items (item_code, region, organization)"
+                ))
     except Exception:
         # Non-fatal: skip if column already migrated or DB does not permit
         pass
