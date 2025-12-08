@@ -73,12 +73,21 @@ def parse_item_master_pivot_csv_text(text: str) -> List[Dict[str, Any]]:
     # Backward compatibility: allow 'Cumilla Zone' as 'Comilla Zone'
     region_headers = ["Comilla Zone" if h == "Cumilla Zone" else h for h in region_headers]
 
+    def clean_str(value) -> str:
+        s = str(value).strip() if value is not None else ""
+        return "" if s.lower() in ("none", "null", "-") else s
+
+    def clean_unit(value) -> str | None:
+        s = str(value).strip() if value is not None else ""
+        return None if s == "" or s.lower() in ("none", "null", "-") else s
+
     for row in reader:
-        division = (row.get(division_h) or "").strip()
-        item_code = (row.get(item_code_h) or "").strip()
-        description = (row.get(description_h) or "").strip()
-        unit = (row.get(unit_h) or "").strip() or None
-        organization = (row.get(org_h) or "RHD").strip() or "RHD"
+        division = clean_str(row.get(division_h))
+        item_code = clean_str(row.get(item_code_h))
+        description = clean_str(row.get(description_h))
+        unit = clean_unit(row.get(unit_h))
+        org_raw = row.get(org_h) if org_h else None
+        organization = clean_str(org_raw) or "RHD"
         if not item_code and not description:
             continue
 
@@ -110,6 +119,14 @@ def parse_item_master_csv_text(text: str) -> List[Dict[str, Any]]:
     missing = [h for h in ITEM_MASTER_HEADERS if h not in reader.fieldnames]
     if missing:
         raise ValueError(f"Missing expected headers in Item Master CSV: {missing}")
+    def clean_str(value) -> str:
+        s = str(value).strip() if value is not None else ""
+        return "" if s.lower() in ("none", "null", "-") else s
+
+    def clean_unit(value) -> str | None:
+        s = str(value).strip() if value is not None else ""
+        return None if s == "" or s.lower() in ("none", "null", "-") else s
+
     for row in reader:
         rate_val = row.get("Rate")
         try:
@@ -117,12 +134,12 @@ def parse_item_master_csv_text(text: str) -> List[Dict[str, Any]]:
         except ValueError:
             rate = None
         entry = {
-            "division": (row.get("Division") or "").strip(),
-            "item_code": (row.get("Item Code") or "").strip(),
-            "item_description": (row.get("Description") or "").strip(),
-            "unit": (row.get("Unit") or "").strip() or None,
+            "division": clean_str(row.get("Division")),
+            "item_code": clean_str(row.get("Item Code")),
+            "item_description": clean_str(row.get("Description")),
+            "unit": clean_unit(row.get("Unit")),
             "rate": rate,
-            "region": (row.get("Region") or "").strip(),
+            "region": clean_str(row.get("Region")),
         }
         # Skip rows missing essential identifiers
         if not entry["item_code"] and not entry["item_description"]:
@@ -144,6 +161,14 @@ def parse_item_master_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
     if missing:
         raise ValueError(f"Missing expected headers in Item Master XLSX: {missing}")
     data: List[Dict[str, Any]] = []
+    def clean_str(value) -> str:
+        s = str(value).strip() if value is not None else ""
+        return "" if s.lower() in ("none", "null", "-") else s
+
+    def clean_unit(value) -> str | None:
+        s = str(value).strip() if value is not None else ""
+        return None if s == "" or s.lower() in ("none", "null", "-") else s
+
     for row in ws.iter_rows(min_row=2):
         def val(hname):
             idx = header_index[hname]
@@ -155,12 +180,12 @@ def parse_item_master_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
         except (ValueError, TypeError):
             rate = None
         entry = {
-            "division": str(val("Division") or "").strip(),
-            "item_code": str(val("Item Code") or "").strip(),
-            "item_description": str(val("Description") or "").strip(),
-            "unit": (str(val("Unit")) if val("Unit") is not None else "").strip() or None,
+            "division": clean_str(val("Division")),
+            "item_code": clean_str(val("Item Code")),
+            "item_description": clean_str(val("Description")),
+            "unit": clean_unit(val("Unit")),
             "rate": rate,
-            "region": str(val("Region") or "").strip(),
+            "region": clean_str(val("Region")),
         }
         if not entry["item_code"] and not entry["item_description"]:
             continue
@@ -223,6 +248,14 @@ def parse_item_master_pivot_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]
         region_headers.append(h)
 
     data: List[Dict[str, Any]] = []
+    def clean_str(value) -> str:
+        s = str(value).strip() if value is not None else ""
+        return "" if s.lower() in ("none", "null", "-") else s
+
+    def clean_unit(value) -> str | None:
+        s = str(value).strip() if value is not None else ""
+        return None if s == "" or s.lower() in ("none", "null", "-") else s
+
     for row in ws.iter_rows(min_row=2):
         def val(hname):
             idx = header_index.get(hname)
@@ -231,13 +264,13 @@ def parse_item_master_pivot_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]
             cell = row[idx]
             return cell.value if cell.value is not None else None
 
-        division = str(row[idx_division].value if idx_division is not None else "").strip()
-        item_code = str(row[idx_item_code].value if idx_item_code is not None else "").strip()
-        description = str(row[idx_description].value if idx_description is not None else "").strip()
+        division = clean_str(row[idx_division].value if idx_division is not None else None)
+        item_code = clean_str(row[idx_item_code].value if idx_item_code is not None else None)
+        description = clean_str(row[idx_description].value if idx_description is not None else None)
         unit_cell = row[idx_unit] if idx_unit is not None else None
-        unit = (str(unit_cell.value) if unit_cell and unit_cell.value is not None else "").strip() or None
+        unit = clean_unit(unit_cell.value if unit_cell else None)
         org_cell = row[idx_org] if idx_org is not None else None
-        organization = str(org_cell.value if org_cell and org_cell.value is not None else "RHD").strip() or "RHD"
+        organization = clean_str(org_cell.value if org_cell else None) or "RHD"
 
         if not item_code and not description:
             continue

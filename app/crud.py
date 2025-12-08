@@ -13,6 +13,14 @@ def get_division_by_name(db: Session, name: str, organization_id: int | None = N
     return q.first()
 
 def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
+    # Defensive validation: skip placeholder or empty identifiers
+    code_clean = (item_data.item_code or "").strip()
+    desc_clean = (item_data.item_description or "").strip()
+    if not code_clean and not desc_clean:
+        raise ValueError("Empty item row: missing both code and description")
+    if code_clean.lower() in ("none", "null", "-") or desc_clean.lower() in ("none", "null", "-"):
+        raise ValueError("Invalid placeholder values for item code/description")
+
     # Resolve organization
     org_name = item_data.organization or "RHD"
     org = get_organization_by_name(db, org_name)
@@ -52,8 +60,8 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
         # Create new item
         item_create_data = schemas.ItemCreate(
             division_id=division.division_id,
-            item_code=item_data.item_code,
-            item_description=item_data.item_description,
+            item_code=code_clean,
+            item_description=desc_clean,
             unit=item_data.unit,
             rate=item_data.rate,
             region=item_data.region,
