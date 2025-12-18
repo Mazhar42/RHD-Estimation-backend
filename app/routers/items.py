@@ -294,11 +294,17 @@ def import_items(
         # WARNING: This clears item master; may affect existing estimations
         crud.delete_all_items(db)
 
-    # Upsert each entry
+    # Upsert each entry; skip rows with missing/blank rate
     count = 0
+    skipped = 0
     for row in parsed:
         try:
             item_parsed = schemas.ItemParsed(**row)
+            # Skip if rate is missing/blank
+            r = row.get("rate")
+            if r is None or (isinstance(r, str) and not r.strip()):
+                skipped += 1
+                continue
             crud.create_item_from_parsed_data(db, item_parsed)
             count += 1
         except Exception as e:
@@ -308,5 +314,4 @@ def import_items(
             except Exception:
                 pass
             print(f"Import error for row {row.get('item_code')}: {e}")
-
-    return {"message": f"Import {mode} completed", "processed": count}
+    return {"message": f"Import {mode} completed", "processed": count, "skipped": skipped}

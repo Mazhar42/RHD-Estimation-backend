@@ -83,7 +83,6 @@ app = FastAPI(title="Estimation Backend", version="1.0.0")
 # Explicitly list frontend origins and allow Netlify deploy previews via regex.
 origins = [
     "https://rhd-estimation.netlify.app",
-    "http://localhost:5175",
     "http://localhost:5173",
 ]
 
