@@ -2,7 +2,207 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select, func
 from . import models, schemas
 from sqlalchemy.exc import IntegrityError
+from .security import get_password_hash, verify_password
+from datetime import datetime
 
+# =============== User CRUD Operations ===============
+
+def create_user(db: Session, user: schemas.UserCreate) -> models.User:
+    """Create a new user."""
+    db_user = models.User(
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        hashed_password=get_password_hash(user.password)
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+def get_user_by_username(db: Session, username: str) -> models.User | None:
+    """Get a user by username."""
+    return db.query(models.User).filter(models.User.username == username).first()
+
+def get_user_by_email(db: Session, email: str) -> models.User | None:
+    """Get a user by email."""
+    return db.query(models.User).filter(models.User.email == email).first()
+
+def get_user_by_id(db: Session, user_id: int) -> models.User | None:
+    """Get a user by ID."""
+    return db.query(models.User).filter(models.User.user_id == user_id).first()
+
+def get_all_users(db: Session, skip: int = 0, limit: int = 100) -> list[models.User]:
+    """Get all users."""
+    return db.query(models.User).offset(skip).limit(limit).all()
+
+def get_user_count(db: Session) -> int:
+    return db.query(func.count(models.User.user_id)).scalar() or 0
+
+def update_user(db: Session, user_id: int, user_update: schemas.UserUpdate) -> models.User | None:
+    """Update a user."""
+    db_user = get_user_by_id(db, user_id)
+    if not db_user:
+        return None
+    
+    if user_update.email:
+        db_user.email = user_update.email
+    if user_update.full_name:
+        db_user.full_name = user_update.full_name
+    if user_update.password:
+        db_user.hashed_password = get_password_hash(user_update.password)
+    
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+def deactivate_user(db: Session, user_id: int) -> models.User | None:
+    """Deactivate a user."""
+    db_user = get_user_by_id(db, user_id)
+    if db_user:
+        db_user.is_active = False
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+def activate_user(db: Session, user_id: int) -> models.User | None:
+    """Activate a user."""
+    db_user = get_user_by_id(db, user_id)
+    if db_user:
+        db_user.is_active = True
+        db.commit()
+        db.refresh(db_user)
+    return db_user
+
+# =============== Role CRUD Operations ===============
+
+def create_role(db: Session, role: schemas.RoleCreate, is_system_role: bool = False) -> models.Role:
+    """Create a new role."""
+    db_role = models.Role(
+        name=role.name,
+        description=role.description,
+        is_system_role=is_system_role
+    )
+    db.add(db_role)
+    db.commit()
+    db.refresh(db_role)
+    return db_role
+
+def get_role_by_name(db: Session, name: str) -> models.Role | None:
+    """Get a role by name."""
+    return db.query(models.Role).filter(models.Role.name == name).first()
+
+def get_role_by_id(db: Session, role_id: int) -> models.Role | None:
+    """Get a role by ID."""
+    return db.query(models.Role).filter(models.Role.role_id == role_id).first()
+
+def get_all_roles(db: Session, skip: int = 0, limit: int = 100) -> list[models.Role]:
+    """Get all roles."""
+    return db.query(models.Role).offset(skip).limit(limit).all()
+
+def update_role(db: Session, role_id: int, role_update: schemas.RoleUpdate) -> models.Role | None:
+    """Update a role."""
+    db_role = get_role_by_id(db, role_id)
+    if not db_role:
+        return None
+    
+    if role_update.name:
+        db_role.name = role_update.name
+    if role_update.description:
+        db_role.description = role_update.description
+    
+    db.commit()
+    db.refresh(db_role)
+    return db_role
+
+def delete_role(db: Session, role_id: int) -> bool:
+    """Delete a role (if not system role)."""
+    db_role = get_role_by_id(db, role_id)
+    if not db_role or db_role.is_system_role:
+        return False
+    
+    db.delete(db_role)
+    db.commit()
+    return True
+
+def assign_role_to_user(db: Session, user_id: int, role_id: int) -> bool:
+    """Assign a role to a user."""
+    db_user = get_user_by_id(db, user_id)
+    db_role = get_role_by_id(db, role_id)
+    
+    if not db_user or not db_role:
+        return False
+    
+    if db_role not in db_user.roles:
+        db_user.roles.append(db_role)
+        db.commit()
+    return True
+
+def remove_role_from_user(db: Session, user_id: int, role_id: int) -> bool:
+    """Remove a role from a user."""
+    db_user = get_user_by_id(db, user_id)
+    db_role = get_role_by_id(db, role_id)
+    
+    if not db_user or not db_role:
+        return False
+    
+    if db_role in db_user.roles:
+        db_user.roles.remove(db_role)
+        db.commit()
+    return True
+
+# =============== Permission CRUD Operations ===============
+
+def create_permission(db: Session, permission: schemas.PermissionCreate) -> models.Permission:
+    """Create a new permission."""
+    db_permission = models.Permission(
+        name=permission.name,
+        description=permission.description
+    )
+    db.add(db_permission)
+    db.commit()
+    db.refresh(db_permission)
+    return db_permission
+
+def get_permission_by_name(db: Session, name: str) -> models.Permission | None:
+    """Get a permission by name."""
+    return db.query(models.Permission).filter(models.Permission.name == name).first()
+
+def get_permission_by_id(db: Session, permission_id: int) -> models.Permission | None:
+    """Get a permission by ID."""
+    return db.query(models.Permission).filter(models.Permission.permission_id == permission_id).first()
+
+def get_all_permissions(db: Session, skip: int = 0, limit: int = 100) -> list[models.Permission]:
+    """Get all permissions."""
+    return db.query(models.Permission).offset(skip).limit(limit).all()
+
+def assign_permission_to_role(db: Session, role_id: int, permission_id: int) -> bool:
+    """Assign a permission to a role."""
+    db_role = get_role_by_id(db, role_id)
+    db_permission = get_permission_by_id(db, permission_id)
+    
+    if not db_role or not db_permission:
+        return False
+    
+    if db_permission not in db_role.permissions:
+        db_role.permissions.append(db_permission)
+        db.commit()
+    return True
+
+def remove_permission_from_role(db: Session, role_id: int, permission_id: int) -> bool:
+    """Remove a permission from a role."""
+    db_role = get_role_by_id(db, role_id)
+    db_permission = get_permission_by_id(db, permission_id)
+    
+    if not db_role or not db_permission:
+        return False
+    
+    if db_permission in db_role.permissions:
+        db_role.permissions.remove(db_permission)
+        db.commit()
+    return True
+
+# =============== Organization CRUD Operations ===============
 def get_organization_by_name(db: Session, name: str):
     return db.query(models.Organization).filter(models.Organization.name == name).first()
 
@@ -228,8 +428,36 @@ def delete_all_items(db: Session) -> int:
     db.commit()
     return result.rowcount
 
-def create_project(db: Session, data: schemas.ProjectCreate):
-    obj = models.Project(**data.model_dump())
+def get_special_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
+    query = db.query(models.SpecialItem).options(joinedload(models.SpecialItem.division))
+    if region:
+        query = query.filter(models.SpecialItem.region == region)
+    if organization:
+        query = query.filter(models.SpecialItem.organization == organization)
+    return query.offset(skip).limit(limit).all()
+
+def create_special_item_from_item(db: Session, item: models.Item):
+    special_item = models.SpecialItem(
+        item_id=item.item_id,
+        division_id=item.division_id,
+        item_code=item.item_code,
+        item_description=item.item_description,
+        unit=item.unit,
+        rate=item.rate,
+        region=item.region,
+        organization=item.organization,
+    )
+    db.add(special_item)
+    db.commit()
+    db.refresh(special_item)
+    return special_item
+
+def create_project(db: Session, data: schemas.ProjectCreate, user_id: int | None = None):
+    obj = models.Project(
+        **data.model_dump(),
+        created_by_id=user_id,
+        updated_by_id=user_id
+    )
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -244,21 +472,31 @@ def delete_project(db: Session, project_id: int):
     return project
 
 def list_projects(db: Session):
-    return db.execute(select(models.Project)).scalars().all()
+    stmt = select(models.Project).options(
+        joinedload(models.Project.created_by),
+        joinedload(models.Project.updated_by)
+    )
+    return db.execute(stmt).scalars().all()
 
-def update_project(db: Session, project_id: int, data: schemas.ProjectUpdate):
+def update_project(db: Session, project_id: int, data: schemas.ProjectUpdate, user_id: int | None = None):
     project = db.get(models.Project, project_id)
     if not project:
         return None
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
+    project.updated_by_id = user_id or project.updated_by_id
     db.add(project)
     db.commit()
     db.refresh(project)
     return project
 
-def create_estimation(db: Session, project_id: int, data: schemas.EstimationCreate):
-    obj = models.Estimation(project_id=project_id, **data.model_dump())
+def create_estimation(db: Session, project_id: int, data: schemas.EstimationCreate, user_id: int | None = None):
+    obj = models.Estimation(
+        project_id=project_id,
+        **data.model_dump(),
+        created_by_id=user_id,
+        updated_by_id=user_id
+    )
     db.add(obj)
     db.commit()
     db.refresh(obj)
@@ -273,15 +511,23 @@ def delete_estimation(db: Session, estimation_id: int):
     return estimation
 
 def list_estimations_for_project(db: Session, project_id: int):
-    stmt = select(models.Estimation).where(models.Estimation.project_id == project_id)
+    stmt = (
+        select(models.Estimation)
+        .where(models.Estimation.project_id == project_id)
+        .options(
+            joinedload(models.Estimation.created_by),
+            joinedload(models.Estimation.updated_by)
+        )
+    )
     return db.execute(stmt).scalars().all()
 
-def update_estimation(db: Session, estimation_id: int, data: schemas.EstimationUpdate):
+def update_estimation(db: Session, estimation_id: int, data: schemas.EstimationUpdate, user_id: int | None = None):
     estimation = db.get(models.Estimation, estimation_id)
     if not estimation:
         return None
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(estimation, key, value)
+    estimation.updated_by_id = user_id or estimation.updated_by_id
     db.add(estimation)
     db.commit()
     db.refresh(estimation)
@@ -315,6 +561,9 @@ def create_estimation_line(db: Session, estimation_id: int, data: schemas.Estima
         length=data.length,
         width=data.width,
         thickness=data.thickness,
+        length_expr=data.length_expr,
+        width_expr=data.width_expr,
+        thickness_expr=data.thickness_expr,
         quantity=data.quantity,
         calculated_qty=calc_qty,
         rate=line_rate,
@@ -345,6 +594,9 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
     line.length = data.length
     line.width = data.width
     line.thickness = data.thickness
+    line.length_expr = data.length_expr
+    line.width_expr = data.width_expr
+    line.thickness_expr = data.thickness_expr
     line.quantity = data.quantity
     # Update attachment fields if provided
     line.attachment_name = data.attachment_name
@@ -360,6 +612,124 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
     db.commit()
     db.refresh(line)
     return line
+
+def create_special_item_request(db: Session, estimation_id: int, data: schemas.SpecialItemRequestCreate, user_id: int):
+    item_code = f"SP-{int(datetime.utcnow().timestamp() * 1000)}"
+    obj = models.SpecialItemRequest(
+        estimation_id=estimation_id,
+        division_id=data.division_id,
+        item_description=data.item_description,
+        unit=data.unit,
+        rate=data.rate,
+        region=data.region,
+        organization=data.organization,
+        item_code=item_code,
+        attachment_name=data.attachment_name,
+        attachment_base64=data.attachment_base64,
+        sub_description=data.sub_description,
+        no_of_units=data.no_of_units,
+        length=data.length,
+        width=data.width,
+        thickness=data.thickness,
+        length_expr=data.length_expr,
+        width_expr=data.width_expr,
+        thickness_expr=data.thickness_expr,
+        quantity=data.quantity,
+        requested_by_id=user_id,
+        status="pending",
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+def list_special_item_requests(db: Session, estimation_id: int | None = None, status: str | None = None):
+    query = db.query(models.SpecialItemRequest).options(
+        joinedload(models.SpecialItemRequest.requested_by),
+        joinedload(models.SpecialItemRequest.reviewed_by),
+        joinedload(models.SpecialItemRequest.division),
+    )
+    if estimation_id is not None:
+        query = query.filter(models.SpecialItemRequest.estimation_id == estimation_id)
+    if status:
+        query = query.filter(models.SpecialItemRequest.status == status)
+    return query.order_by(models.SpecialItemRequest.created_at.desc()).all()
+
+def list_special_item_requests_for_user(db: Session, estimation_id: int | None, user_id: int, status: str | None = None):
+    query = db.query(models.SpecialItemRequest).options(
+        joinedload(models.SpecialItemRequest.requested_by),
+        joinedload(models.SpecialItemRequest.reviewed_by),
+        joinedload(models.SpecialItemRequest.division),
+    ).filter(models.SpecialItemRequest.requested_by_id == user_id)
+    if estimation_id is not None:
+        query = query.filter(models.SpecialItemRequest.estimation_id == estimation_id)
+    if status:
+        query = query.filter(models.SpecialItemRequest.status == status)
+    return query.order_by(models.SpecialItemRequest.created_at.desc()).all()
+
+def approve_special_item_request(db: Session, request_id: int, reviewer_id: int):
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        return None
+    if req.status != "pending":
+        return req
+
+    item = models.Item(
+        division_id=req.division_id,
+        item_code=req.item_code or f"SP-{int(datetime.utcnow().timestamp() * 1000)}",
+        item_description=req.item_description,
+        unit=req.unit,
+        rate=req.rate,
+        region=req.region,
+        organization=req.organization,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    special_item = create_special_item_from_item(db, item)
+
+    line_payload = schemas.EstimationLineCreate(
+        item_id=item.item_id,
+        sub_description=req.sub_description,
+        no_of_units=req.no_of_units,
+        length=req.length,
+        width=req.width,
+        thickness=req.thickness,
+        length_expr=req.length_expr,
+        width_expr=req.width_expr,
+        thickness_expr=req.thickness_expr,
+        quantity=req.quantity,
+        attachment_name=req.attachment_name,
+        attachment_base64=req.attachment_base64,
+    )
+    line = create_estimation_line(db, req.estimation_id, line_payload)
+
+    req.status = "approved"
+    req.reviewed_by_id = reviewer_id
+    req.reviewed_at = datetime.utcnow()
+    req.item_id = item.item_id
+    req.special_item_id = special_item.special_item_id
+    req.line_id = line.line_id
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
+
+def reject_special_item_request(db: Session, request_id: int, reviewer_id: int, reason: str | None = None):
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        return None
+    if req.status != "pending":
+        return req
+    req.status = "rejected"
+    req.reviewed_by_id = reviewer_id
+    req.reviewed_at = datetime.utcnow()
+    req.reason = reason
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
 
 def list_estimation_lines(db: Session, estimation_id: int):
     stmt = select(models.EstimationLine).where(models.EstimationLine.estimation_id == estimation_id).options(

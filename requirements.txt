@@ -7,3 +7,8 @@ python-multipart
 psycopg2-binary
 alembic
 openpyxl
+python-jose[cryptography]
+passlib[argon2]
+argon2-cffi
+python-dotenv
+email-validator

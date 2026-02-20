@@ -61,6 +61,14 @@ def read_items(region: str | None = None, organization: str | None = None, skip:
         print(f"Error in read_items: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+@router.get("/special", response_model=List[schemas.SpecialItem])
+def read_special_items(region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    try:
+        return crud.get_special_items(db, region=region, organization=organization, skip=skip, limit=limit)
+    except Exception as e:
+        print(f"Error in read_special_items: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 @router.put("/{item_id}", response_model=schemas.Item)
 
 def update_item(item_id: int, payload: schemas.ItemUpdate, db: Session = Depends(get_db)):
@@ -248,35 +256,45 @@ def export_items_xlsx(db: Session = Depends(get_db)):
 @router.post("/import")
 def import_items(
     file: UploadFile = File(...),
-    mode: str = Query("append", regex="^(append|replace)$"),
+    mode: str = Query("append", pattern="^(append|replace)$"),
     db: Session = Depends(get_db)
 ):
     # Read uploaded file bytes
     file_bytes = file.file.read()
     filename = file.filename or "uploaded"
     ext = filename.split(".")[-1].lower() if "." in filename else ""
+    
+    print(f"DEBUG: Import called with file={filename}, mode={mode}, size={len(file_bytes)} bytes")
 
     # Parse according to provided format
     try:
         if ext == "csv":
             text = file_bytes.decode("utf-8", errors="replace")
+            print(f"DEBUG: CSV content first 200 chars: {text[:200]}")
             # Try linear format first, then pivoted as fallback
             try:
                 parsed = parse_item_master_csv_text(text)
-            except Exception:
+                print(f"DEBUG: Parsed {len(parsed)} rows from CSV (linear format)")
+            except Exception as e1:
+                print(f"DEBUG: Linear format failed: {e1}, trying pivoted...")
                 parsed = parse_item_master_pivot_csv_text(text)
+                print(f"DEBUG: Parsed {len(parsed)} rows from CSV (pivoted format)")
         elif ext in ("xlsx", "xlsm"):
             # Try linear format first, then pivoted as fallback
             try:
                 parsed = parse_item_master_xlsx_bytes(file_bytes)
-            except Exception:
+                print(f"DEBUG: Parsed {len(parsed)} rows from XLSX (linear format)")
+            except Exception as e1:
+                print(f"DEBUG: Linear format failed: {e1}, trying pivoted...")
                 parsed = parse_item_master_pivot_xlsx_bytes(file_bytes)
+                print(f"DEBUG: Parsed {len(parsed)} rows from XLSX (pivoted format)")
         else:
             # Try content-type as fallback
             if file.content_type and "csv" in file.content_type:
                 text = file_bytes.decode("utf-8", errors="replace")
                 try:
                     parsed = parse_item_master_csv_text(text)
+                    print(f"DEBUG: Parsed {len(parsed)} rows from {file.content_type}")
                 except Exception:
                     parsed = parse_item_master_pivot_csv_text(text)
             elif file.content_type and "spreadsheet" in file.content_type:
@@ -287,6 +305,7 @@ def import_items(
             else:
                 raise HTTPException(status_code=400, detail="Unsupported file type. Upload CSV or XLSX in Item Master format.")
     except Exception as e:
+        print(f"DEBUG: Parse error: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
 
     # Mode: replace or append
@@ -297,21 +316,55 @@ def import_items(
     # Upsert each entry; skip rows with missing/blank rate
     count = 0
     skipped = 0
-    for row in parsed:
+    errors = []
+    
+    for idx, row in enumerate(parsed, 1):
         try:
-            item_parsed = schemas.ItemParsed(**row)
             # Skip if rate is missing/blank
             r = row.get("rate")
             if r is None or (isinstance(r, str) and not r.strip()):
                 skipped += 1
                 continue
+            
+            # Validate and parse the row
+            item_parsed = schemas.ItemParsed(**row)
+            
+            # Create or update the item
             crud.create_item_from_parsed_data(db, item_parsed)
             count += 1
-        except Exception as e:
-            # Continue on errors; collect stats
+            
+        except ValueError as ve:
+            # Validation error
+            error_msg = f"Row {idx}: {str(ve)}"
+            errors.append(error_msg)
+            print(f"Import validation error: {error_msg}")
             try:
                 db.rollback()
             except Exception:
                 pass
-            print(f"Import error for row {row.get('item_code')}: {e}")
-    return {"message": f"Import {mode} completed", "processed": count, "skipped": skipped}
+        except Exception as e:
+            # Other errors - continue but track them
+            error_msg = f"Row {idx} ({row.get('item_code', 'unknown')}): {str(e)}"
+            errors.append(error_msg)
+            print(f"Import error: {error_msg}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    
+    # Final commit to save everything
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Failed to save imported items: {str(e)}"
+        )
+    
+    return {
+        "message": f"Import {mode} completed", 
+        "processed": count, 
+        "skipped": skipped,
+        "errors": errors if errors else None
+    }
