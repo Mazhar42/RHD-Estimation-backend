@@ -221,6 +221,7 @@ class EstimationLineBase(BaseModel):
     item_id: int
     sub_description: Optional[str] = None
     no_of_units: int = 1
+    no_of_units_expr: Optional[str] = None
     length: Optional[float] = None
     width: Optional[float] = None
     thickness: Optional[float] = None
@@ -243,6 +244,7 @@ class SpecialItemRequestCreate(BaseModel):
     attachment_base64: Optional[str] = None
     sub_description: Optional[str] = None
     no_of_units: int = 1
+    no_of_units_expr: Optional[str] = None
     length: Optional[float] = None
     width: Optional[float] = None
     thickness: Optional[float] = None
@@ -268,6 +270,7 @@ class SpecialItemRequest(BaseModel):
     attachment_base64: Optional[str] = None
     sub_description: Optional[str] = None
     no_of_units: int
+    no_of_units_expr: Optional[str] = None
     length: Optional[float] = None
     width: Optional[float] = None
     thickness: Optional[float] = None

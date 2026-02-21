@@ -156,6 +156,7 @@ class EstimationLine(Base):
 
     sub_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     no_of_units: Mapped[int] = mapped_column(Integer, default=1)
+    no_of_units_expr: Mapped[str | None] = mapped_column(String(255), nullable=True)
     length: Mapped[float | None] = mapped_column(Numeric(15,3), nullable=True)
     width: Mapped[float | None] = mapped_column(Numeric(15,3), nullable=True)
     thickness: Mapped[float | None] = mapped_column(Numeric(15,3), nullable=True)
@@ -188,6 +189,7 @@ class SpecialItemRequest(Base):
     attachment_base64: Mapped[str | None] = mapped_column(Text, nullable=True)
     sub_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     no_of_units: Mapped[int] = mapped_column(Integer, default=1)
+    no_of_units_expr: Mapped[str | None] = mapped_column(String(255), nullable=True)
     length: Mapped[float | None] = mapped_column(Numeric(15, 3), nullable=True)
     width: Mapped[float | None] = mapped_column(Numeric(15, 3), nullable=True)
     thickness: Mapped[float | None] = mapped_column(Numeric(15, 3), nullable=True)

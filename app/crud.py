@@ -558,6 +558,7 @@ def create_estimation_line(db: Session, estimation_id: int, data: schemas.Estima
         item_id=data.item_id,
         sub_description=data.sub_description,
         no_of_units=data.no_of_units or 1,
+        no_of_units_expr=data.no_of_units_expr,
         length=data.length,
         width=data.width,
         thickness=data.thickness,
@@ -596,6 +597,7 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
 
     line.sub_description = data.sub_description
     line.no_of_units = data.no_of_units or 1
+    line.no_of_units_expr = data.no_of_units_expr
     line.length = data.length
     line.width = data.width
     line.thickness = data.thickness
@@ -698,6 +700,7 @@ def approve_special_item_request(db: Session, request_id: int, reviewer_id: int)
         item_id=item.item_id,
         sub_description=req.sub_description,
         no_of_units=req.no_of_units,
+        no_of_units_expr=req.no_of_units_expr,
         length=req.length,
         width=req.width,
         thickness=req.thickness,

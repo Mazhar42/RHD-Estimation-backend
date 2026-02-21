@@ -43,6 +43,8 @@ try:
             conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN width_expr VARCHAR(255) NULL"))
         if 'thickness_expr' not in est_line_columns:
             conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN thickness_expr VARCHAR(255) NULL"))
+        if 'no_of_units_expr' not in est_line_columns:
+            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN no_of_units_expr VARCHAR(255) NULL"))
 
     special_req_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('special_item_requests')]
     with engine.begin() as conn:
@@ -52,6 +54,8 @@ try:
             conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN width_expr VARCHAR(255) NULL"))
         if 'thickness_expr' not in special_req_columns:
             conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN thickness_expr VARCHAR(255) NULL"))
+        if 'no_of_units_expr' not in special_req_columns:
+            conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN no_of_units_expr VARCHAR(255) NULL"))
 
     # Create new tables if not exist
     # Note: Base.metadata.create_all handles creation, but we also backfill defaults below.
