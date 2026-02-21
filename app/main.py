@@ -5,10 +5,22 @@ from .database import Base, engine, SessionLocal
 from sqlalchemy import inspect, text
 from .routers import items, projects, estimations, divisions, organizations, auth
 from . import crud, schemas
+from .initial_data import init_db
 import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Initialize default roles and permissions
+db_init = SessionLocal()
+try:
+    init_db(db_init)
+finally:
+    db_init.close()
 
 insp = inspect(engine)
 try:

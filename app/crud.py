@@ -588,7 +588,12 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
         return None
 
     # Update fields from payload
-    # Note: item_id is not updated
+    if data.item_id and data.item_id != line.item_id:
+        line.item_id = data.item_id
+        # Update rate based on new item
+        line_rate = get_item_rate(db, data.item_id) or 0.0
+        line.rate = line_rate
+
     line.sub_description = data.sub_description
     line.no_of_units = data.no_of_units or 1
     line.length = data.length

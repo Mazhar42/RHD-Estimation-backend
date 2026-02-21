@@ -45,6 +45,16 @@ def get_db():
     finally:
         db.close()
 
+import logging
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Setup logging
+logger = logging.getLogger(__name__)
+
 async def get_current_user(credentials = Depends(security), db: Session = Depends(get_db)) -> User:
     """Get the current authenticated user from JWT token."""
     token = credentials.credentials
@@ -59,17 +69,35 @@ async def get_current_user(credentials = Depends(security), db: Session = Depend
         username: str = payload.get("sub")
         user_id: int = payload.get("user_id")
         if username is None or user_id is None:
+            logger.warning("Token payload missing sub or user_id")
             raise credentials_exception
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"JWT decode error: {str(e)}")
         raise credentials_exception
     
     user = db.query(User).filter(User.username == username).first()
     if user is None:
+        logger.warning(f"User not found for username: {username}")
         raise credentials_exception
     if not user.is_active:
+        logger.warning(f"User inactive: {username}")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User is inactive")
     
     return user
+
+def is_superadmin(user: User = Depends(get_current_user)) -> User:
+    """Dependency to check if user is a superadmin."""
+    for role in user.roles:
+        if role.name == "superadmin":
+            return user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Superadmin access required"
+    )
+
+def is_admin_user(user: User) -> bool:
+    """Check if user has admin or superadmin role."""
+    return any(r.name in ("admin", "superadmin") for r in (user.roles or []))
 
 def check_permission(required_permission: str):
     """Dependency to check if user has a specific permission."""

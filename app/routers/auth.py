@@ -90,17 +90,23 @@ def register(user: schemas.RegisterRequest, db: Session = Depends(get_db)):
             detail=f"Registration failed: {str(e)}"
         )
 
+from fastapi.security import OAuth2PasswordRequestForm
+
 @router.post("/login", response_model=schemas.Token)
-def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Authenticate user and return access token."""
     try:
-        logger.info(f"Login attempt for username: {credentials.username}")
+        logger.info(f"Login attempt for: {form_data.username}")
         
-        # Get user by username
-        db_user = crud.get_user_by_username(db, credentials.username)
+        # Try to find user by username
+        db_user = crud.get_user_by_username(db, form_data.username)
+        
+        # If not found by username, try by email
+        if not db_user:
+            db_user = crud.get_user_by_email(db, form_data.username)
         
         if not db_user:
-            logger.warning(f"User not found: {credentials.username}")
+            logger.warning(f"User not found: {form_data.username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
@@ -108,8 +114,8 @@ def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
             )
         
         # Verify password
-        if not verify_password(credentials.password, db_user.hashed_password):
-            logger.warning(f"Password verification failed for user: {credentials.username}")
+        if not verify_password(form_data.password, db_user.hashed_password):
+            logger.warning(f"Password verification failed for user: {db_user.username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials",
@@ -117,7 +123,7 @@ def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
             )
         
         if not db_user.is_active:
-            logger.warning(f"Inactive user login attempt: {credentials.username}")
+            logger.warning(f"Inactive user login attempt: {db_user.username}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User is inactive"
@@ -130,7 +136,7 @@ def login(credentials: schemas.LoginRequest, db: Session = Depends(get_db)):
             expires_delta=access_token_expires
         )
         
-        logger.info(f"Login successful for user: {credentials.username}")
+        logger.info(f"Login successful for user: {db_user.username}")
         return {
             "access_token": access_token,
             "token_type": "bearer",
