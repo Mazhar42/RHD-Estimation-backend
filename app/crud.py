@@ -681,7 +681,7 @@ def approve_special_item_request(db: Session, request_id: int, reviewer_id: int)
 
     item = models.Item(
         division_id=req.division_id,
-        item_code=req.item_code or f"SP-{int(datetime.utcnow().timestamp() * 1000)}",
+        item_code=req.item_code or f"SP-{req.division_id:02d}/01/{req.request_id:03d}",
         item_description=req.item_description,
         unit=req.unit,
         rate=req.rate,
@@ -738,7 +738,8 @@ def reject_special_item_request(db: Session, request_id: int, reviewer_id: int, 
 
 def list_estimation_lines(db: Session, estimation_id: int):
     stmt = select(models.EstimationLine).where(models.EstimationLine.estimation_id == estimation_id).options(
-        joinedload(models.EstimationLine.item).joinedload(models.Item.division)
+        joinedload(models.EstimationLine.item).joinedload(models.Item.division),
+        joinedload(models.EstimationLine.item).joinedload(models.Item.special_item)
     )
     return db.execute(stmt).scalars().all()
 

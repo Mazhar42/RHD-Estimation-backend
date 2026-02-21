@@ -17,6 +17,16 @@ def get_db():
 def is_admin_user(user: models.User) -> bool:
     return any(r.name in ("admin", "superadmin") for r in (user.roles or []))
 
+@router.get("/special-item-requests/all", response_model=List[schemas.SpecialItemRequest])
+def list_all_special_item_requests(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:read"))
+):
+    if is_admin_user(current_user):
+        return crud.list_special_item_requests(db, estimation_id=None, status=status)
+    return crud.list_special_item_requests_for_user(db, estimation_id=None, user_id=current_user.user_id, status=status)
+
 @router.post("/{estimation_id}/lines", response_model=schemas.EstimationLine)
 def add_line(
     estimation_id: int, 

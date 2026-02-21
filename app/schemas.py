@@ -139,6 +139,23 @@ class RegionUpdate(BaseModel):
     name: str | None = None
 
 # Item Schemas
+class SpecialItemBase(BaseModel):
+    item_code: str
+    item_description: str
+    unit: Optional[str] = None
+    rate: Optional[float] = None
+    region: str
+    organization: str = "RHD"
+
+class SpecialItem(SpecialItemBase):
+    special_item_id: int
+    item_id: int
+    division_id: int
+    division: Division
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
 class ItemBase(BaseModel):
     item_code: str
     item_description: str
@@ -172,23 +189,7 @@ class Item(ItemBase):
     item_id: int
     division_id: int
     division: Division
-
-    model_config = ConfigDict(from_attributes=True)
-
-class SpecialItemBase(BaseModel):
-    item_code: str
-    item_description: str
-    unit: Optional[str] = None
-    rate: Optional[float] = None
-    region: str
-    organization: str = "RHD"
-
-class SpecialItem(SpecialItemBase):
-    special_item_id: int
-    item_id: int
-    division_id: int
-    division: Division
-    created_at: datetime
+    special_item: Optional[SpecialItem] = None
 
     model_config = ConfigDict(from_attributes=True)
 
