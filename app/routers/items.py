@@ -136,6 +136,11 @@ def delete_item(
         obj = db.get(models.Item, item_id)
         if not obj:
             raise HTTPException(status_code=404, detail="Item not found")
+        
+        # Manually delete special_item if present
+        if obj.special_item:
+            db.delete(obj.special_item)
+
         # Prepare response before the object is deleted/expired
         response_payload = schemas.Item.model_validate(obj)
         db.delete(obj)

@@ -73,6 +73,13 @@ def create_estimation(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(check_permission("estimations:create"))
 ):
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project.created_by_id != current_user.user_id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to add estimation to this project")
+
     return crud.create_estimation(db, project_id, payload, current_user.user_id)
 
 @router.get("/{project_id}/estimations", response_model=List[schemas.Estimation])

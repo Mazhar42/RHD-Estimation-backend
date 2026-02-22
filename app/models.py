@@ -97,7 +97,7 @@ class Item(Base):
     division = relationship("Division", back_populates="items")
     # historical relationships from earlier design not strictly required
     estimation_lines = relationship("EstimationLine", back_populates="item")
-    special_item = relationship("SpecialItem", back_populates="item", uselist=False)
+    special_item = relationship("SpecialItem", back_populates="item", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("item_code", "region", "organization", name="uq_item_code_region_org"),

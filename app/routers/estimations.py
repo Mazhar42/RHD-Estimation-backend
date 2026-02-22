@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from typing import List, Dict, Any
 from ..database import SessionLocal
 from .. import schemas, crud, models
@@ -109,11 +110,16 @@ def delete_lines(
     if not payload.line_ids:
         return {"message": "No lines to delete."}
 
-    # Verify ownership of all lines (or at least the first one, assuming lines belong to one estimation)
-    # To be safe, we check the estimation of the first line.
-    first_line = db.get(models.EstimationLine, payload.line_ids[0])
-    if first_line:
-        est = db.get(models.Estimation, first_line.estimation_id)
+    # Verify ownership of all lines
+    stmt = select(models.EstimationLine.estimation_id).where(models.EstimationLine.line_id.in_(payload.line_ids)).distinct()
+    estimation_ids = db.execute(stmt).scalars().all()
+
+    if not estimation_ids:
+         # Lines don't exist, so nothing to delete.
+         return {"message": "0 lines deleted successfully."}
+
+    for est_id in estimation_ids:
+        est = db.get(models.Estimation, est_id)
         if est and est.created_by_id != current_user.user_id and not is_admin_user(current_user):
              raise HTTPException(status_code=403, detail="Not authorized to modify this estimation")
 
@@ -200,3 +206,42 @@ def update_estimation(
 
     updated = crud.update_estimation(db, estimation_id, payload, current_user.user_id)
     return updated
+
+@router.put("/special-item-requests/{request_id}", response_model=schemas.SpecialItemRequest)
+def update_special_item_request_endpoint(
+    request_id: int,
+    payload: schemas.SpecialItemRequestCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:update"))
+):
+    # Verify ownership
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if req.requested_by_id != current_user.user_id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to update this request")
+
+    updated = crud.update_special_item_request(db, request_id, payload)
+    if not updated:
+        raise HTTPException(status_code=400, detail="Cannot update request (must be pending)")
+    return updated
+
+@router.delete("/special-item-requests/{request_id}")
+def delete_special_item_request_endpoint(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:update"))
+):
+    # Verify ownership
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    if req.requested_by_id != current_user.user_id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this request")
+
+    success = crud.delete_special_item_request(db, request_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot delete request (might be approved)")
+    return {"message": "Request deleted successfully"}

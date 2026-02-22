@@ -8,6 +8,7 @@ from ..security import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     get_current_user,
     is_superadmin,
+    is_admin,
     get_db
 )
 import logging
@@ -183,10 +184,10 @@ def change_password(
 @router.post("/users", response_model=schemas.User)
 def create_new_user(
     user: schemas.UserCreate,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Create a new user (superadmin only)."""
+    """Create a new user (admin/superadmin only)."""
     # Check if username already exists
     existing_user = crud.get_user_by_username(db, user.username)
     if existing_user:
@@ -220,19 +221,19 @@ def create_new_user(
 def list_all_users(
     skip: int = 0,
     limit: int = 100,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """List all users (superadmin only)."""
+    """List all users (admin/superadmin only)."""
     return crud.get_all_users(db, skip=skip, limit=limit)
 
 @router.get("/users/{user_id}", response_model=schemas.User)
 def get_user(
     user_id: int,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Get a specific user (superadmin only)."""
+    """Get a specific user (admin/superadmin only)."""
     db_user = crud.get_user_by_id(db, user_id)
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -242,10 +243,10 @@ def get_user(
 def update_user_info(
     user_id: int,
     user_update: schemas.UserUpdate,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Update a user (superadmin only)."""
+    """Update a user (admin/superadmin only)."""
     db_user = crud.update_user(db, user_id, user_update)
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -254,10 +255,10 @@ def update_user_info(
 @router.post("/users/{user_id}/deactivate", response_model=schemas.User)
 def deactivate_user_endpoint(
     user_id: int,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Deactivate a user (superadmin only)."""
+    """Deactivate a user (admin/superadmin only)."""
     db_user = crud.deactivate_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -266,10 +267,10 @@ def deactivate_user_endpoint(
 @router.post("/users/{user_id}/activate", response_model=schemas.User)
 def activate_user_endpoint(
     user_id: int,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Activate a user (superadmin only)."""
+    """Activate a user (admin/superadmin only)."""
     db_user = crud.activate_user(db, user_id)
     if not db_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -298,10 +299,10 @@ def create_new_role(
 def list_all_roles(
     skip: int = 0,
     limit: int = 100,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """List all roles (superadmin only)."""
+    """List all roles (admin/superadmin only)."""
     return crud.get_all_roles(db, skip=skip, limit=limit)
 
 @router.get("/roles/{role_id}", response_model=schemas.Role)
@@ -355,10 +356,10 @@ def delete_role_endpoint(
 def assign_role_to_user_endpoint(
     user_id: int,
     role_id: int,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Assign a role to a user (superadmin only)."""
+    """Assign a role to a user (admin/superadmin only)."""
     success = crud.assign_role_to_user(db, user_id, role_id)
     if not success:
         raise HTTPException(
@@ -371,10 +372,10 @@ def assign_role_to_user_endpoint(
 def remove_role_from_user_endpoint(
     user_id: int,
     role_id: int,
-    current_user: models.User = Depends(is_superadmin),
+    current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """Remove a role from a user (superadmin only)."""
+    """Remove a role from a user (admin/superadmin only)."""
     success = crud.remove_role_from_user(db, user_id, role_id)
     if not success:
         raise HTTPException(

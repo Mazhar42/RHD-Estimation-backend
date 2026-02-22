@@ -374,6 +374,9 @@ def update_region(db: Session, region_id: int, data: schemas.RegionUpdate):
 
 def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
     query = db.query(models.Item).options(joinedload(models.Item.division))
+    # Exclude items that are linked to special items
+    query = query.outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id).filter(models.SpecialItem.special_item_id == None)
+    
     if region:
         query = query.filter(models.Item.region == region)
     if organization:
@@ -400,14 +403,26 @@ def create_item(db: Session, data: schemas.ItemCreate):
 
 def list_items(db: Session):
     stmt = select(models.Item).options(joinedload(models.Item.division))
+    # Exclude special items
+    stmt = stmt.outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id).filter(models.SpecialItem.special_item_id == None)
     return db.execute(stmt).scalars().all()
 
 def update_item(db: Session, item_id: int, data: schemas.ItemUpdate):
     item = db.get(models.Item, item_id)
     if not item:
         return None
-    for key, value in data.model_dump(exclude_unset=True).items():
+    
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
         setattr(item, key, value)
+    
+    # If this item is linked to a SpecialItem, update that too
+    if item.special_item:
+        for key, value in update_data.items():
+            if hasattr(item.special_item, key):
+                setattr(item.special_item, key, value)
+        db.add(item.special_item)
+
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -417,6 +432,11 @@ def delete_item(db: Session, item_id: int):
     item = db.get(models.Item, item_id)
     if not item:
         return None
+    
+    # Ensure associated special_item is deleted
+    if item.special_item:
+        db.delete(item.special_item)
+        
     db.delete(item)
     db.commit()
     return item
@@ -573,13 +593,33 @@ def create_estimation_line(db: Session, estimation_id: int, data: schemas.Estima
         attachment_base64=data.attachment_base64,
     )
     db.add(obj)
+    
+    # Update parent estimation updated_at
+    est = db.get(models.Estimation, estimation_id)
+    if est:
+        est.updated_at = datetime.utcnow()
+        db.add(est)
+
     db.commit()
     db.refresh(obj)
     return obj
 
 def delete_estimation_lines(db: Session, line_ids: list[int]):
+    # Get affected estimation IDs before deletion
+    stmt_select = select(models.EstimationLine.estimation_id).where(models.EstimationLine.line_id.in_(line_ids)).distinct()
+    estimation_ids = db.execute(stmt_select).scalars().all()
+
     stmt = models.EstimationLine.__table__.delete().where(models.EstimationLine.line_id.in_(line_ids))
     result = db.execute(stmt)
+    
+    # Update updated_at for affected estimations
+    if estimation_ids:
+        db.execute(
+            models.Estimation.__table__.update()
+            .where(models.Estimation.estimation_id.in_(estimation_ids))
+            .values(updated_at=datetime.utcnow())
+        )
+        
     db.commit()
     return result.rowcount
 
@@ -616,6 +656,13 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
     line.amount = round(line.calculated_qty * float(line.rate), 2) if line.rate is not None else None
     
     db.add(line)
+
+    # Update parent estimation updated_at
+    est = db.get(models.Estimation, line.estimation_id)
+    if est:
+        est.updated_at = datetime.utcnow()
+        db.add(est)
+
     db.commit()
     db.refresh(line)
     return line
@@ -646,6 +693,14 @@ def create_special_item_request(db: Session, estimation_id: int, data: schemas.S
         status="pending",
     )
     db.add(obj)
+
+    # Update parent estimation updated_at and updated_by_id
+    est = db.get(models.Estimation, estimation_id)
+    if est:
+        est.updated_at = datetime.utcnow()
+        est.updated_by_id = user_id
+        db.add(est)
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -758,3 +813,48 @@ def get_estimation_with_lines(db: Session, estimation_id: int):
     ).scalar_one()
     lines = list_estimation_lines(db, estimation_id)
     return est, lines
+
+def update_special_item_request(db: Session, request_id: int, data: schemas.SpecialItemRequestCreate) -> models.SpecialItemRequest | None:
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        return None
+    if req.status != "pending":
+        # Only pending requests can be updated
+        return None
+    
+    # Update fields
+    req.division_id = data.division_id
+    req.item_description = data.item_description
+    req.unit = data.unit
+    req.rate = data.rate
+    req.region = data.region
+    req.organization = data.organization
+    req.attachment_name = data.attachment_name
+    if data.attachment_base64:
+        req.attachment_base64 = data.attachment_base64
+    req.sub_description = data.sub_description
+    req.no_of_units = data.no_of_units
+    req.length = data.length
+    req.width = data.width
+    req.thickness = data.thickness
+    req.length_expr = data.length_expr
+    req.width_expr = data.width_expr
+    req.thickness_expr = data.thickness_expr
+    req.quantity = data.quantity
+
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
+
+def delete_special_item_request(db: Session, request_id: int) -> bool:
+    req = db.get(models.SpecialItemRequest, request_id)
+    if not req:
+        return False
+    if req.status == "approved":
+        # Approved requests cannot be deleted directly (delete the resulting line instead)
+        return False
+    
+    db.delete(req)
+    db.commit()
+    return True

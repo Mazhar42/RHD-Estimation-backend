@@ -95,6 +95,16 @@ def is_superadmin(user: User = Depends(get_current_user)) -> User:
         detail="Superadmin access required"
     )
 
+def is_admin(user: User = Depends(get_current_user)) -> User:
+    """Dependency to check if user is an admin or superadmin."""
+    for role in user.roles:
+        if role.name in ("admin", "superadmin"):
+            return user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Admin access required"
+    )
+
 def is_admin_user(user: User) -> bool:
     """Check if user has admin or superadmin role."""
     return any(r.name in ("admin", "superadmin") for r in (user.roles or []))
