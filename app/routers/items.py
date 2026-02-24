@@ -373,18 +373,17 @@ def import_items(
         # WARNING: This clears item master; may affect existing estimations
         crud.delete_all_items(db)
 
-    # Upsert each entry; skip rows with missing/blank rate
+    # Upsert each entry; coerce missing/blank rate to 0.0
     count = 0
     skipped = 0
     errors = []
     
     for idx, row in enumerate(parsed, 1):
         try:
-            # Skip if rate is missing/blank
+            # Coerce missing/blank rate to 0.0 instead of skipping
             r = row.get("rate")
             if r is None or (isinstance(r, str) and not r.strip()):
-                skipped += 1
-                continue
+                row["rate"] = 0.0
             
             # Validate and parse the row
             item_parsed = schemas.ItemParsed(**row)
