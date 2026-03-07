@@ -140,23 +140,28 @@ app = FastAPI(title="Estimation Backend", version="1.0.0")
 
 # CORS: cannot use "*" when allow_credentials=True.
 # Explicitly list frontend origins and allow Netlify deploy previews via regex.
-origins = [
-    "https://rhd-estimation.netlify.app",
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "http://127.0.0.1:5175",
-]
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+cors_origins_str = os.getenv("CORS_ORIGINS")
+cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+
+# For development only
+if os.getenv("APP_ENV") == "development":
+    cors_origins.extend([
+        "http://localhost:5173",
+    ])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=r"(https://.*\.netlify\.app|http://localhost:\d+|http://127.0.0.1:\d+)",  # allow Netlify preview sites and all localhost ports
+    allow_origins=cors_origins,
+    # For Netlify previews: be specific
+    allow_origin_regex=None,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],  # Be specific, don't use "*"
+    allow_headers=["Content-Type", "Authorization"],  # Be specific, don't use "*"
 )
 
 # Routers
