@@ -221,11 +221,12 @@ def create_new_user(
 def list_all_users(
     skip: int = 0,
     limit: int = 100,
+    search: str | None = None,
     current_user: models.User = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
-    """List all users (admin/superadmin only)."""
-    return crud.get_all_users(db, skip=skip, limit=limit)
+    """List all users (admin/superadmin only). Supports ?search= for username/email/name."""
+    return crud.get_all_users(db, skip=skip, limit=limit, search=search)
 
 @router.get("/users/{user_id}", response_model=schemas.User)
 def get_user(

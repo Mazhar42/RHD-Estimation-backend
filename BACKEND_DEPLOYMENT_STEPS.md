@@ -123,9 +123,9 @@ Get-Content ~/.ssh/github_actions_key | Set-Clipboard
 
 ### ✅ Phase 1 Complete When:
 
-- [ ] SSH key pair generated
-- [ ] Public key content copied
-- [ ] Private key content saved securely
+- [x] SSH key pair generated
+- [x] Public key content copied
+- [x] Private key content saved securely
 
 ---
 
@@ -371,13 +371,13 @@ docker-compose -f docker-compose.prod.yml logs backend
 
 ### ✅ Phase 2 Complete When:
 
-- [ ] SSH connection successful
-- [ ] Docker & Docker Compose installed
-- [ ] Project directory created at `/opt/rhd-estimation`
-- [ ] Repository cloned
-- [ ] `.env.prod` created with all values
-- [ ] Containers running (3 show in `ps`)
-- [ ] Health check returns 200 OK
+- [x] SSH connection successful
+- [x] Docker & Docker Compose installed
+- [x] Project directory created at `/opt/rhd-estimation`
+- [x] Repository cloned
+- [x] `.env.prod` created with all values
+- [x] Containers running (3 show in `ps`)
+- [x] Health check returns 200 OK
 
 ---
 

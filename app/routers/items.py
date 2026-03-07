@@ -85,28 +85,117 @@ def create_item(
 def read_items(
     region: str | None = None, 
     organization: str | None = None, 
-    skip: int = 0, 
-    limit: int = 100, 
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    search: str | None = None,
+    division_id: int | None = None,
+    unit: str | None = None,
+    rate_min: float | None = None,
+    rate_max: float | None = None,
+    sort_by: str = Query("item_code", pattern="^(item_code|division|rate|region)$"),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(check_permission("items:read"))
 ):
+    """Get paginated items with optional server-side filtering and sorting.
+    
+    Query Parameters:
+    - skip: Number of items to skip (default 0)
+    - limit: Number of items to return, max 1000 (default 100)
+    - search: Search term for item_code or item_description (case-insensitive)
+    - region: Filter by region name
+    - organization: Filter by organization name
+    - division_id: Filter by division ID
+    - unit: Filter by unit
+    - rate_min: Minimum rate (inclusive)
+    - rate_max: Maximum rate (inclusive)
+    - sort_by: Column to sort by (item_code, division, rate, region)
+    - order: Sort order (asc or desc)
+    """
     try:
-        return crud.get_items(db, region=region, organization=organization, skip=skip, limit=limit)
+        return crud.get_items(
+            db, 
+            region=region, 
+            organization=organization, 
+            skip=skip, 
+            limit=limit,
+            search=search,
+            division_id=division_id,
+            unit=unit,
+            rate_min=rate_min,
+            rate_max=rate_max,
+            sort_by=sort_by,
+            order=order
+        )
     except Exception as e:
         print(f"Error in read_items: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@router.get("/count")
+def count_items(
+    region: str | None = None, 
+    organization: str | None = None, 
+    search: str | None = None,
+    division_id: int | None = None,
+    unit: str | None = None,
+    rate_min: float | None = None,
+    rate_max: float | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("items:read"))
+):
+    """Get total count of items with optional filtering (no pagination).
+    
+    Useful for calculating pagination bounds.
+    Returns: { "count": <integer> }
+    """
+    try:
+        total = crud.count_items(
+            db,
+            region=region,
+            organization=organization,
+            search=search,
+            division_id=division_id,
+            unit=unit,
+            rate_min=rate_min,
+            rate_max=rate_max
+        )
+        return {"count": total}
+    except Exception as e:
+        print(f"Error in count_items: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 @router.get("/special", response_model=List[schemas.SpecialItem])
 def read_special_items(
     region: str | None = None, 
     organization: str | None = None, 
-    skip: int = 0, 
-    limit: int = 100, 
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    search: str | None = None,
+    division_id: int | None = None,
+    unit: str | None = None,
+    rate_min: float | None = None,
+    rate_max: float | None = None,
+    sort_by: str = Query("item_code", pattern="^(item_code|division|rate|region)$"),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(check_permission("items:read"))
 ):
+    """Get paginated special items with optional server-side filtering and sorting."""
     try:
-        return crud.get_special_items(db, region=region, organization=organization, skip=skip, limit=limit)
+        return crud.get_special_items(
+            db, 
+            region=region, 
+            organization=organization, 
+            skip=skip, 
+            limit=limit,
+            search=search,
+            division_id=division_id,
+            unit=unit,
+            rate_min=rate_min,
+            rate_max=rate_max,
+            sort_by=sort_by,
+            order=order
+        )
     except Exception as e:
         print(f"Error in read_special_items: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -373,7 +462,7 @@ def import_items(
         # WARNING: This clears item master; may affect existing estimations
         crud.delete_all_items(db)
 
-    # Upsert each entry; coerce missing/blank rate to 0.0
+    # Bulk upsert: use a single transaction for all rows (much faster)
     count = 0
     skipped = 0
     errors = []
@@ -388,30 +477,22 @@ def import_items(
             # Validate and parse the row
             item_parsed = schemas.ItemParsed(**row)
             
-            # Create or update the item
-            crud.create_item_from_parsed_data(db, item_parsed)
+            # Create or update the item (no individual commits)
+            crud.create_item_from_parsed_data_bulk(db, item_parsed)
             count += 1
             
         except ValueError as ve:
-            # Validation error
             error_msg = f"Row {idx}: {str(ve)}"
             errors.append(error_msg)
-            print(f"Import validation error: {error_msg}")
-            try:
-                db.rollback()
-            except Exception:
-                pass
         except Exception as e:
-            # Other errors - continue but track them
             error_msg = f"Row {idx} ({row.get('item_code', 'unknown')}): {str(e)}"
             errors.append(error_msg)
-            print(f"Import error: {error_msg}")
             try:
                 db.rollback()
             except Exception:
                 pass
     
-    # Final commit to save everything
+    # Single commit for all rows
     try:
         db.commit()
     except Exception as e:
@@ -425,5 +506,6 @@ def import_items(
         "message": f"Import {mode} completed", 
         "processed": count, 
         "skipped": skipped,
-        "errors": errors if errors else None
+        "errors": errors[:50] if errors else None,
+        "total_errors": len(errors) if errors else 0
     }

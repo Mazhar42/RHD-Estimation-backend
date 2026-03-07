@@ -30,9 +30,9 @@ def run_migrations():
         
         # Run pending migrations
         command.upgrade(alembic_cfg, "head")
-        print("✓ Database migrations completed successfully")
+        print("[OK] Database migrations completed successfully")
     except Exception as e:
-        print(f"⚠ Note: Database migration check completed (error: {type(e).__name__})")
+        print(f"[INFO] Database migration check completed (error: {type(e).__name__})")
         print(f"  This is normal if tables already exist in production.")
 
 # Run migrations on startup
@@ -163,7 +163,7 @@ def init_system_roles_and_permissions():
                     crud.assign_permission_to_role(db, superadmin_role.role_id, perm.permission_id)
         
         db.close()
-        print("✓ System roles and permissions initialized successfully")
+        print("[OK] System roles and permissions initialized successfully")
     except Exception as e:
         print(f"Warning: Could not initialize system roles - {e}")
         pass
@@ -185,5 +185,8 @@ def ensure_admin_user():
         pass
 
 # Initialize system roles on startup
-init_system_roles_and_permissions()
-ensure_admin_user()
+try:
+    init_system_roles_and_permissions()
+    ensure_admin_user()
+except Exception as e:
+    print(f"[ERROR] Initialization failed: {e}")

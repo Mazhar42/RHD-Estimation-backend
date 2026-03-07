@@ -148,48 +148,97 @@ def parse_item_master_csv_text(text: str) -> List[Dict[str, Any]]:
     return data
 
 def parse_item_master_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:
-    """Parse Item Master XLSX in memory to list of dicts expected by ItemParsed."""
+    """Parse Item Master XLSX in memory to list of dicts expected by ItemParsed.
+    
+    Flexible header matching - accepts common synonyms and is case-insensitive.
+    """
     if load_workbook is None:
         raise ImportError("openpyxl is not installed. Please add 'openpyxl' to requirements or install it.")
     from io import BytesIO
     wb = load_workbook(filename=BytesIO(file_bytes), data_only=True)
     ws = wb.active
-    # Headers
-    headers = [cell.value if cell.value is not None else "" for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-    header_index = {str(h).strip(): idx for idx, h in enumerate(headers)}
-    missing = [h for h in ITEM_MASTER_HEADERS if h not in header_index]
+    
+    # Get headers from first row
+    headers_raw = [str(cell.value).strip() if cell.value else "" for cell in next(ws.iter_rows(min_row=1, max_row=1))]
+    print(f"DEBUG XLSX: Found {len(headers_raw)} headers: {headers_raw}")
+    
+    # Build case-insensitive header lookup
+    norm = lambda s: str(s or "").strip().lower()
+    norm_to_orig = {norm(h): h for h in headers_raw}
+    
+    # Define synonyms for each required column
+    header_map = {
+        "division": ["division", "major division", "div"],
+        "item_code": ["item code", "code", "itemcode", "item", "item_code"],
+        "item_description": ["description", "item description", "desc", "item desc"],
+        "unit": ["unit", "units"],
+        "rate": ["rate", "rate/unit"],
+        "region": ["region", "zone", "area"],
+    }
+    
+    # Find which column index corresponds to each field
+    field_to_idx = {}
+    for field_name, synonyms in header_map.items():
+        for synonym in synonyms:
+            if synonym in norm_to_orig:
+                orig_header = norm_to_orig[synonym]
+                field_to_idx[field_name] = headers_raw.index(orig_header)
+                print(f"DEBUG XLSX: Matched '{field_name}' to column '{orig_header}' (index {field_to_idx[field_name]})")
+                break
+    
+    # Check we found all required fields
+    required = ["division", "item_code", "item_description", "unit", "rate", "region"]
+    missing = [f for f in required if f not in field_to_idx]
     if missing:
-        raise ValueError(f"Missing expected headers in Item Master XLSX: {missing}")
+        raise ValueError(f"Missing required columns: {missing}. Found: {headers_raw}")
+    
     data: List[Dict[str, Any]] = []
+    
     def clean_str(value) -> str:
-        s = str(value).strip() if value is not None else ""
+        s = str(value).strip() if value else ""
         return "" if s.lower() in ("none", "null", "-") else s
-
+    
     def clean_unit(value) -> str | None:
-        s = str(value).strip() if value is not None else ""
+        s = str(value).strip() if value else ""
         return None if s == "" or s.lower() in ("none", "null", "-") else s
-
-    for row in ws.iter_rows(min_row=2):
-        def val(hname):
-            idx = header_index[hname]
-            cell = row[idx]
-            return cell.value if cell.value is not None else None
-        rate_cell = val("Rate")
+    
+    # Parse data rows
+    for row_num, row in enumerate(ws.iter_rows(min_row=2), start=2):
         try:
-            rate = float(rate_cell) if rate_cell not in (None, "", "-") else None
-        except (ValueError, TypeError):
-            rate = None
-        entry = {
-            "division": clean_str(val("Division")),
-            "item_code": clean_str(val("Item Code")),
-            "item_description": clean_str(val("Description")),
-            "unit": clean_unit(val("Unit")),
-            "rate": rate,
-            "region": clean_str(val("Region")),
-        }
-        if not entry["item_code"] and not entry["item_description"]:
+            # Extract values using the column indexes we found
+            div_val = row[field_to_idx["division"]].value if field_to_idx["division"] < len(row) else None
+            code_val = row[field_to_idx["item_code"]].value if field_to_idx["item_code"] < len(row) else None
+            desc_val = row[field_to_idx["item_description"]].value if field_to_idx["item_description"] < len(row) else None
+            unit_val = row[field_to_idx["unit"]].value if field_to_idx["unit"] < len(row) else None
+            rate_val = row[field_to_idx["rate"]].value if field_to_idx["rate"] < len(row) else None
+            region_val = row[field_to_idx["region"]].value if field_to_idx["region"] < len(row) else None
+            
+            # Parse rate
+            try:
+                rate = float(rate_val) if rate_val not in (None, "", "-") else None
+            except (ValueError, TypeError):
+                rate = None
+            
+            entry = {
+                "division": clean_str(div_val),
+                "item_code": clean_str(code_val),
+                "item_description": clean_str(desc_val),
+                "unit": clean_unit(unit_val),
+                "rate": rate,
+                "region": clean_str(region_val),
+            }
+            
+            # Skip empty rows
+            if not entry["item_code"] and not entry["item_description"]:
+                continue
+            
+            data.append(entry)
+        except Exception as e:
+            # Log but continue on row parsing errors
+            print(f"DEBUG XLSX: Error parsing row {row_num}: {e}")
             continue
-        data.append(entry)
+    
+    print(f"DEBUG XLSX: Successfully parsed {len(data)} rows from XLSX")
     return data
 
 def parse_item_master_pivot_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]]:

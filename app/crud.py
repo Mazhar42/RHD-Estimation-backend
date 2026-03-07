@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, func
+from sqlalchemy import select, func, tuple_
 from . import models, schemas
 from sqlalchemy.exc import IntegrityError
 from .security import get_password_hash, verify_password
@@ -32,9 +32,17 @@ def get_user_by_id(db: Session, user_id: int) -> models.User | None:
     """Get a user by ID."""
     return db.query(models.User).filter(models.User.user_id == user_id).first()
 
-def get_all_users(db: Session, skip: int = 0, limit: int = 100) -> list[models.User]:
-    """Get all users."""
-    return db.query(models.User).offset(skip).limit(limit).all()
+def get_all_users(db: Session, skip: int = 0, limit: int = 100, search: str | None = None) -> list[models.User]:
+    """Get all users with optional search."""
+    query = db.query(models.User)
+    if search:
+        term = f"%{search}%"
+        query = query.filter(
+            func.lower(models.User.username).like(term.lower()) |
+            func.lower(models.User.email).like(term.lower()) |
+            func.lower(models.User.full_name).like(term.lower())
+        )
+    return query.offset(skip).limit(limit).all()
 
 def get_user_count(db: Session) -> int:
     return db.query(func.count(models.User.user_id)).scalar() or 0
@@ -212,6 +220,14 @@ def get_division_by_name(db: Session, name: str, organization_id: int | None = N
         q = q.filter(models.Division.organization_id == organization_id)
     return q.first()
 
+def get_item_by_code_region_org(db: Session, item_code: str, region: str, organization: str):
+    """Get an item by its code, region, and organization (unique key)."""
+    return db.query(models.Item).filter(
+        models.Item.item_code == item_code,
+        models.Item.region == region,
+        models.Item.organization == organization,
+    ).first()
+
 def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
     # Defensive validation: skip placeholder or empty identifiers
     code_clean = (item_data.item_code or "").strip()
@@ -270,6 +286,58 @@ def create_item_from_parsed_data(db: Session, item_data: schemas.ItemParsed):
             organization=org.name
         )
         return create_item(db, item_create_data)
+
+def create_item_from_parsed_data_bulk(db: Session, item_data: schemas.ItemParsed):
+    """Same as create_item_from_parsed_data but without per-row commit (for bulk imports)."""
+    code_clean = (item_data.item_code or "").strip()
+    desc_clean = (item_data.item_description or "").strip()
+    if not code_clean and not desc_clean:
+        raise ValueError("Empty item row: missing both code and description")
+    if code_clean.lower() in ("none", "null", "-") or desc_clean.lower() in ("none", "null", "-"):
+        raise ValueError("Invalid placeholder values for item code/description")
+
+    org_name = item_data.organization or "RHD"
+    org = get_organization_by_name(db, org_name)
+    if not org:
+        org = create_organization(db, schemas.OrganizationCreate(name=org_name))
+
+    if item_data.region:
+        existing_regions = list_regions_for_org(db, org.org_id)
+        if not any(r.name == item_data.region for r in existing_regions):
+            create_region(db, schemas.RegionCreate(name=item_data.region, organization_id=org.org_id))
+
+    division = get_division_by_name(db, item_data.division)
+    if not division:
+        try:
+            division = create_division(db, schemas.DivisionCreate(name=item_data.division, organization_id=org.org_id))
+        except IntegrityError:
+            db.rollback()
+            division = get_division_by_name(db, item_data.division)
+
+    existing_item = get_item_by_code_region_org(db, item_data.item_code, item_data.region, org.name)
+
+    if existing_item:
+        existing_item.item_description = item_data.item_description
+        existing_item.unit = item_data.unit
+        existing_item.rate = item_data.rate
+        existing_item.division_id = division.division_id
+        existing_item.organization = org.name
+        db.add(existing_item)
+        # No commit here — caller handles the transaction
+        return existing_item
+    else:
+        obj = models.Item(
+            division_id=division.division_id,
+            item_code=code_clean,
+            item_description=desc_clean,
+            unit=item_data.unit,
+            rate=item_data.rate,
+            region=item_data.region,
+            organization=org.name,
+        )
+        db.add(obj)
+        # No commit here — caller handles the transaction
+        return obj
 
 def get_divisions(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Division).offset(skip).limit(limit).all()
@@ -372,27 +440,102 @@ def update_region(db: Session, region_id: int, data: schemas.RegionUpdate):
     db.refresh(obj)
     return obj
 
-def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
-    query = db.query(models.Item).options(joinedload(models.Item.division))
-    # Exclude items that are linked to special items
-    query = query.outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id).filter(models.SpecialItem.special_item_id == None)
-    
-    if region:
-        query = query.filter(models.Item.region == region)
-    if organization:
-        query = query.filter(models.Item.organization == organization)
-    return query.offset(skip).limit(limit).all()
+def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100,
+              search: str | None = None, division_id: int | None = None, unit: str | None = None,
+              rate_min: float | None = None, rate_max: float | None = None,
+              sort_by: str = "item_code", order: str = "asc"):
+    """Get paginated items with optional server-side filtering and sorting.
 
-def get_item_by_code_region_org(db: Session, item_code: str, region: str, organization: str):
+    skip and limit are in terms of unique (division_id, item_code) pairs so that
+    limit=50 always returns exactly 50 grouped items regardless of region count.
+    """
+    # Determine sort column
+    if sort_by == "rate":
+        sort_column = models.Item.rate
+    elif sort_by == "region":
+        sort_column = models.Item.region
+    elif sort_by == "division":
+        sort_column = models.Item.division_id
+    else:
+        sort_column = models.Item.item_code
+
+    order_expr = sort_column.desc() if order.lower() == "desc" else sort_column.asc()
+
+    # Step 1: get the Nth page of distinct (division_id, item_code) pairs
+    pairs_q = (
+        db.query(models.Item.division_id, models.Item.item_code)
+        .outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id)
+        .filter(models.SpecialItem.special_item_id == None)
+    )
+    if region:
+        pairs_q = pairs_q.filter(models.Item.region == region)
+    if organization:
+        pairs_q = pairs_q.filter(models.Item.organization == organization)
+    if division_id is not None:
+        pairs_q = pairs_q.filter(models.Item.division_id == division_id)
+    if unit:
+        pairs_q = pairs_q.filter(models.Item.unit == unit)
+    if rate_min is not None:
+        pairs_q = pairs_q.filter(models.Item.rate >= rate_min)
+    if rate_max is not None:
+        pairs_q = pairs_q.filter(models.Item.rate <= rate_max)
+    if search:
+        st = f"%{search}%"
+        pairs_q = pairs_q.filter(
+            db.func.lower(models.Item.item_code).like(st.lower()) |
+            db.func.lower(models.Item.item_description).like(st.lower())
+        )
+
+    pairs = (
+        pairs_q.distinct()
+        .order_by(order_expr, models.Item.division_id.asc())
+        .offset(skip).limit(limit)
+        .all()
+    )
+
+    if not pairs:
+        return []
+
+    # Step 2: fetch all region rows for those pairs
     return (
         db.query(models.Item)
-        .filter(
-            models.Item.item_code == item_code,
-            models.Item.region == region,
-            models.Item.organization == organization,
-        )
-        .first()
+        .options(joinedload(models.Item.division))
+        .outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id)
+        .filter(models.SpecialItem.special_item_id == None)
+        .filter(tuple_(models.Item.division_id, models.Item.item_code).in_(pairs))
+        .order_by(order_expr, models.Item.division_id.asc(), models.Item.region.asc())
+        .all()
     )
+
+def count_items(db: Session, region: str | None = None, organization: str | None = None,
+                search: str | None = None, division_id: int | None = None, unit: str | None = None,
+                rate_min: float | None = None, rate_max: float | None = None) -> int:
+    """Count distinct (division_id, item_code) pairs — i.e. the number of unique grouped items."""
+    pairs_q = (
+        db.query(models.Item.division_id, models.Item.item_code)
+        .outerjoin(models.SpecialItem, models.Item.item_id == models.SpecialItem.item_id)
+        .filter(models.SpecialItem.special_item_id == None)
+    )
+    if region:
+        pairs_q = pairs_q.filter(models.Item.region == region)
+    if organization:
+        pairs_q = pairs_q.filter(models.Item.organization == organization)
+    if division_id is not None:
+        pairs_q = pairs_q.filter(models.Item.division_id == division_id)
+    if unit:
+        pairs_q = pairs_q.filter(models.Item.unit == unit)
+    if rate_min is not None:
+        pairs_q = pairs_q.filter(models.Item.rate >= rate_min)
+    if rate_max is not None:
+        pairs_q = pairs_q.filter(models.Item.rate <= rate_max)
+    if search:
+        st = f"%{search}%"
+        pairs_q = pairs_q.filter(
+            db.func.lower(models.Item.item_code).like(st.lower()) |
+            db.func.lower(models.Item.item_description).like(st.lower())
+        )
+    subq = pairs_q.distinct().subquery()
+    return db.query(func.count()).select_from(subq).scalar() or 0
 
 def create_item(db: Session, data: schemas.ItemCreate):
     obj = models.Item(**data.model_dump())
@@ -448,13 +591,61 @@ def delete_all_items(db: Session) -> int:
     db.commit()
     return result.rowcount
 
-def get_special_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100):
-    query = db.query(models.SpecialItem).options(joinedload(models.SpecialItem.division))
+def get_special_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100,
+                      search: str | None = None, division_id: int | None = None, unit: str | None = None,
+                      rate_min: float | None = None, rate_max: float | None = None,
+                      sort_by: str = "item_code", order: str = "asc"):
+    """Get paginated special items. skip/limit are in terms of unique (division_id, item_code) pairs."""
+    if sort_by == "rate":
+        sort_column = models.SpecialItem.rate
+    elif sort_by == "region":
+        sort_column = models.SpecialItem.region
+    elif sort_by == "division":
+        sort_column = models.SpecialItem.division_id
+    else:
+        sort_column = models.SpecialItem.item_code
+
+    order_expr = sort_column.desc() if order.lower() == "desc" else sort_column.asc()
+
+    # Step 1: page of distinct (division_id, item_code) pairs
+    pairs_q = db.query(models.SpecialItem.division_id, models.SpecialItem.item_code)
     if region:
-        query = query.filter(models.SpecialItem.region == region)
+        pairs_q = pairs_q.filter(models.SpecialItem.region == region)
     if organization:
-        query = query.filter(models.SpecialItem.organization == organization)
-    return query.offset(skip).limit(limit).all()
+        pairs_q = pairs_q.filter(models.SpecialItem.organization == organization)
+    if division_id is not None:
+        pairs_q = pairs_q.filter(models.SpecialItem.division_id == division_id)
+    if unit:
+        pairs_q = pairs_q.filter(models.SpecialItem.unit == unit)
+    if rate_min is not None:
+        pairs_q = pairs_q.filter(models.SpecialItem.rate >= rate_min)
+    if rate_max is not None:
+        pairs_q = pairs_q.filter(models.SpecialItem.rate <= rate_max)
+    if search:
+        st = f"%{search}%"
+        pairs_q = pairs_q.filter(
+            db.func.lower(models.SpecialItem.item_code).like(st.lower()) |
+            db.func.lower(models.SpecialItem.item_description).like(st.lower())
+        )
+
+    pairs = (
+        pairs_q.distinct()
+        .order_by(order_expr, models.SpecialItem.division_id.asc())
+        .offset(skip).limit(limit)
+        .all()
+    )
+
+    if not pairs:
+        return []
+
+    # Step 2: all region rows for those pairs
+    return (
+        db.query(models.SpecialItem)
+        .options(joinedload(models.SpecialItem.division))
+        .filter(tuple_(models.SpecialItem.division_id, models.SpecialItem.item_code).in_(pairs))
+        .order_by(order_expr, models.SpecialItem.division_id.asc(), models.SpecialItem.region.asc())
+        .all()
+    )
 
 def create_special_item_from_item(db: Session, item: models.Item):
     special_item = models.SpecialItem(
