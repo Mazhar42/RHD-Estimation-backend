@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: rhd-estimation-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-estimation_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+      POSTGRES_DB: ${DB_NAME:-rhd_estimation}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-estimation_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  backend:
+    build: .
+    container_name: rhd-estimation-backend
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql://${DB_USER:-estimation_user}:${DB_PASSWORD:-changeme}@db:5432/${DB_NAME:-rhd_estimation}
+      SECRET_KEY: ${SECRET_KEY:-your-dev-secret-key-change-in-production}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    networks:
+      - app-network
+
+  # Optional: pgAdmin for database management during development
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: rhd-estimation-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+
+networks:
+  app-network:
+    driver: bridge

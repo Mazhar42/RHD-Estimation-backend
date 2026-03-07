@@ -1,0 +1,56 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+
+jobs:
+  validate:
+    name: Validate Changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Check for .env files
+        run: |
+          echo "Checking for committed .env files..."
+          if git diff --name-only HEAD~1 | grep -E '\.env\.|secrets'; then
+            echo "❌ ERROR: Environment files should not be committed!"
+            exit 1
+          fi
+          echo "✓ No environment files in commit"
+
+      - name: Check for console logs
+        working-directory: ./backend
+        continue-on-error: true
+        run: |
+          echo "Checking for debug print statements..."
+          ! grep -r "print(" app/ --include="*.py" | grep -v "logger\|#"
+
+      - name: Docker Compose validation
+        working-directory: ./backend
+        run: |
+          docker-compose config > /dev/null
+          docker-compose -f docker-compose.prod.yml config > /dev/null
+          echo "✓ Docker Compose files are valid"
+
+      - name: Requirements.txt syntax
+        working-directory: ./backend
+        run: |
+          cat requirements.txt | while read line; do
+            if [[ ! -z "$line" && ! "$line" =~ ^# ]]; then
+              # Basic validation (package names should not contain certain characters)
+              if [[ ! "$line" =~ ^[a-zA-Z0-9_-]+(\[[a-zA-Z0-9_,-\]]*)?(\=+[a-zA-Z0-9.]+)?$ ]]; then
+                echo "Invalid requirement: $line"
+                exit 1
+              fi
+            fi
+          done
+          echo "✓ Requirements.txt is valid"
