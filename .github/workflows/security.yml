@@ -62,19 +62,19 @@ jobs:
           pip install flake8 pylint black
 
       - name: Check code formatting with Black
-        working-directory: ./backend
+        working-directory: .
         continue-on-error: true
         run: |
           black --check app/
 
       - name: Lint with flake8
-        working-directory: ./backend
+        working-directory: .
         continue-on-error: true
         run: |
           flake8 app/ --max-line-length=120 --extend-ignore=E203,W503
 
       - name: Check with pylint
-        working-directory: ./backend
+        working-directory: .
         continue-on-error: true
         run: |
           pylint app/ --disable=all --enable=E,F || true
@@ -93,6 +93,6 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ./backend
+          context: .
           push: false
           tags: rhd-estimation-backend:test
