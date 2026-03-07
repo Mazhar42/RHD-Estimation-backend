@@ -28,21 +28,21 @@ jobs:
           echo "✓ No environment files in commit"
 
       - name: Check for console logs
-        working-directory: ./backend
+        working-directory: .
         continue-on-error: true
         run: |
           echo "Checking for debug print statements..."
           ! grep -r "print(" app/ --include="*.py" | grep -v "logger\|#"
 
       - name: Docker Compose validation
-        working-directory: ./backend
+        working-directory: .
         run: |
           docker-compose config > /dev/null
           docker-compose -f docker-compose.prod.yml config > /dev/null
           echo "✓ Docker Compose files are valid"
 
       - name: Requirements.txt syntax
-        working-directory: ./backend
+        working-directory: .
         run: |
           cat requirements.txt | while read line; do
             if [[ ! -z "$line" && ! "$line" =~ ^# ]]; then
