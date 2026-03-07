@@ -82,8 +82,12 @@ jobs:
 
             cd /opt/rhd-ces/backend || exit 1
 
-            # Load environment for DB_USER and DB_NAME
-            source .env.prod
+            # Load environment for DB_USER and DB_NAME (if it exists)
+            if [ -f ".env" ]; then
+              source .env
+            else
+              echo "Note: .env not found, skipping database backup"
+            fi
 
             # Pull latest code
             echo "Pulling latest changes..."
@@ -94,11 +98,13 @@ jobs:
             echo "Building Docker image..."
             docker-compose -f docker-compose.prod.yml build --no-cache
 
-            # Backup database
-            echo "Creating database backup..."
-            mkdir -p /opt/rhd-ces/backups
-            BACKUP_FILE="/opt/rhd-ces/backups/backup-$(date +%Y%m%d-%H%M%S).sql"
-            docker-compose -f docker-compose.prod.yml exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || echo "Backup skipped"
+            # Backup database (only if .env exists and containers are running)
+            if [ -f ".env" ]; then
+              echo "Creating database backup..."
+              mkdir -p /opt/rhd-ces/backups
+              BACKUP_FILE="/opt/rhd-ces/backups/backup-$(date +%Y%m%d-%H%M%S).sql"
+              docker-compose -f docker-compose.prod.yml exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || echo "Backup skipped"
+            fi
 
             # Stop old containers
             echo "Stopping containers..."
