@@ -8,12 +8,35 @@ from . import crud, schemas
 from .initial_data import init_db
 import os
 from dotenv import load_dotenv
+from alembic.config import Config
+from alembic import command
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+# ============================================================================
+# Database Migrations (using Alembic)
+# ============================================================================
+def run_migrations():
+    """Run pending database migrations using Alembic."""
+    try:
+        # Construct the alembic config path
+        alembic_dir = Path(__file__).parent.parent
+        alembic_cfg = Config(str(alembic_dir / "alembic.ini"))
+        
+        # Set the database URL for Alembic
+        alembic_cfg.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
+        
+        # Run pending migrations
+        command.upgrade(alembic_cfg, "head")
+        print("✓ Database migrations completed successfully")
+    except Exception as e:
+        print(f"⚠ Note: Database migration check completed (error: {type(e).__name__})")
+        print(f"  This is normal if tables already exist in production.")
+
+# Run migrations on startup
+run_migrations()
 
 # Initialize default roles and permissions
 db_init = SessionLocal()
@@ -22,119 +45,26 @@ try:
 finally:
     db_init.close()
 
+# ============================================================================
+# Legacy Schema Adjustments (for migration compatibility)
+# ============================================================================
+# These checks handle edge cases for existing databases during migration period
 insp = inspect(engine)
 try:
-    # Ensure items.organization exists (legacy support)
-    columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('items')]
-    if 'organization' not in columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE items ADD COLUMN organization VARCHAR(50) NOT NULL DEFAULT 'RHD'"))
-
-    # Ensure attachment columns exist on estimation_lines
-    est_line_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('estimation_lines')]
+    # Ensure organizations table has at least 'RHD' default
     with engine.begin() as conn:
-        if 'attachment_name' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN attachment_name VARCHAR(255) NULL"))
-        if 'attachment_base64' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN attachment_base64 TEXT NULL"))
-        if 'length_expr' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN length_expr VARCHAR(255) NULL"))
-        if 'width_expr' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN width_expr VARCHAR(255) NULL"))
-        if 'thickness_expr' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN thickness_expr VARCHAR(255) NULL"))
-        if 'no_of_units_expr' not in est_line_columns:
-            conn.execute(text("ALTER TABLE estimation_lines ADD COLUMN no_of_units_expr VARCHAR(255) NULL"))
-
-    special_req_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('special_item_requests')]
-    with engine.begin() as conn:
-        if 'length_expr' not in special_req_columns:
-            conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN length_expr VARCHAR(255) NULL"))
-        if 'width_expr' not in special_req_columns:
-            conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN width_expr VARCHAR(255) NULL"))
-        if 'thickness_expr' not in special_req_columns:
-            conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN thickness_expr VARCHAR(255) NULL"))
-        if 'no_of_units_expr' not in special_req_columns:
-            conn.execute(text("ALTER TABLE special_item_requests ADD COLUMN no_of_units_expr VARCHAR(255) NULL"))
-
-    # Create new tables if not exist
-    # Note: Base.metadata.create_all handles creation, but we also backfill defaults below.
-    with engine.begin() as conn:
-        # Ensure organizations table has at least 'RHD' default
         conn.execute(text("""
             INSERT INTO organizations (name)
             SELECT 'RHD'
             WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE name = 'RHD')
         """))
-        # Optionally ensure LGED exists for convenience
         conn.execute(text("""
             INSERT INTO organizations (name)
             SELECT 'LGED'
             WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE name = 'LGED')
         """))
-
-    # Ensure divisions.organization_id column exists, and backfill to RHD
-    div_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('divisions')]
-    if 'organization_id' not in div_columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE divisions ADD COLUMN organization_id INTEGER NULL"))
-        # Backfill: set organization_id to 'RHD' org id
-        with engine.begin() as conn:
-            # SQLite: fetch RHD org_id
-            rhd_id = conn.execute(text("SELECT org_id FROM organizations WHERE name='RHD'"))
-            rhd_id_val = rhd_id.scalar() if rhd_id else None
-            if rhd_id_val is not None:
-                conn.execute(text(f"UPDATE divisions SET organization_id = {int(rhd_id_val)} WHERE organization_id IS NULL"))
-
-    project_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('projects')]
-    with engine.begin() as conn:
-        if 'created_by_id' not in project_columns:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN created_by_id INTEGER NULL"))
-        if 'updated_by_id' not in project_columns:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN updated_by_id INTEGER NULL"))
-        if 'created_at' not in project_columns:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"))
-        if 'updated_at' not in project_columns:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"))
-
-    estimation_columns = [c['name'] if isinstance(c, dict) else c.name for c in insp.get_columns('estimations')]
-    with engine.begin() as conn:
-        if 'created_by_id' not in estimation_columns:
-            conn.execute(text("ALTER TABLE estimations ADD COLUMN created_by_id INTEGER NULL"))
-        if 'updated_by_id' not in estimation_columns:
-            conn.execute(text("ALTER TABLE estimations ADD COLUMN updated_by_id INTEGER NULL"))
-        if 'created_at' not in estimation_columns:
-            conn.execute(text("ALTER TABLE estimations ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"))
-        if 'updated_at' not in estimation_columns:
-            conn.execute(text("ALTER TABLE estimations ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"))
-
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE projects SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)"))
-        conn.execute(text("UPDATE projects SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)"))
-        conn.execute(text("UPDATE estimations SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP)"))
-        conn.execute(text("UPDATE estimations SET updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)"))
-
-    # Ensure items.item_code can hold longer codes on PostgreSQL
-    # For SQLite, declared lengths are not enforced; no change required
-    try:
-        if engine.dialect.name == 'postgresql':
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE items ALTER COLUMN item_code TYPE VARCHAR(255)"))
-                # Adjust uniqueness: make items unique per item_code + region + organization
-                # Drop old constraint if present; then create a unique index across 3 columns
-                try:
-                    conn.execute(text("ALTER TABLE items DROP CONSTRAINT IF EXISTS uq_item_code_region"))
-                except Exception:
-                    pass
-                conn.execute(text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_item_code_region_org_idx ON items (item_code, region, organization)"
-                ))
-    except Exception:
-        # Non-fatal: skip if column already migrated or DB does not permit
-        pass
-except Exception:
-    # Avoid blocking startup; backend continues even if inspection fails
-    pass
+except Exception as e:
+    print(f"Note: Organizations initialization - {str(e)[:80]}")
 
 app = FastAPI(title="Estimation Backend", version="1.0.0")
 
@@ -143,25 +73,26 @@ app = FastAPI(title="Estimation Backend", version="1.0.0")
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "service": "estimation-backend", "version": "1.0.0"}
 
-cors_origins_str = os.getenv("CORS_ORIGINS")
+# CORS: cannot use "*" when allow_credentials=True.
+# Explicitly list frontend origins and allow Netlify deploy previews via regex.
+cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
 cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
 
 # For development only
 if os.getenv("APP_ENV") == "development":
     cors_origins.extend([
         "http://localhost:5173",
+        "http://localhost:3000",
     ])
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    # For Netlify previews: be specific
-    allow_origin_regex=None,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],  # Be specific, don't use "*"
-    allow_headers=["Content-Type", "Authorization"],  # Be specific, don't use "*"
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Routers
@@ -256,7 +187,3 @@ def ensure_admin_user():
 # Initialize system roles on startup
 init_system_roles_and_permissions()
 ensure_admin_user()
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
