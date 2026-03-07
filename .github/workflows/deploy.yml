@@ -72,7 +72,6 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          script_stop_on_error: true
           script: |
             set -euo pipefail
 
