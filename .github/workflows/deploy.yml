@@ -96,23 +96,23 @@ jobs:
 
             # Build new image
             echo "Building Docker image..."
-            docker-compose -f docker-compose.prod.yml build --no-cache
+            docker compose -f docker-compose.prod.yml build --no-cache
 
             # Backup database (only if .env exists and containers are running)
             if [ -f ".env" ]; then
               echo "Creating database backup..."
               mkdir -p /opt/rhd-ces/backups
               BACKUP_FILE="/opt/rhd-ces/backups/backup-$(date +%Y%m%d-%H%M%S).sql"
-              docker-compose -f docker-compose.prod.yml exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || echo "Backup skipped"
+              docker compose -f docker-compose.prod.yml exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || echo "Backup skipped"
             fi
 
             # Stop old containers
             echo "Stopping containers..."
-            docker-compose -f docker-compose.prod.yml down
+            docker compose -f docker-compose.prod.yml down
 
             # Start new containers
             echo "Starting new containers..."
-            docker-compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d
 
             # Wait for services to be ready
             echo "Waiting for services..."
@@ -136,7 +136,7 @@ jobs:
             # Display status
             echo ""
             echo "Container status:"
-            docker-compose -f docker-compose.prod.yml ps
+            docker compose -f docker-compose.prod.yml ps
 
             echo "✓ Deployment completed successfully"
 
