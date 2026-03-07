@@ -181,7 +181,7 @@ def ensure_admin_user():
                 crud.assign_role_to_user(db, user.user_id, admin_role.role_id)
         db.close()
     except Exception as e:
-        print(f"Warning: Could not ensure admin user - {e}")
+        print(f"Warning: Could not ensure admin user info - {e}")
         pass
 
 # Initialize system roles on startup
