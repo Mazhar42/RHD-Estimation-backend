@@ -80,7 +80,7 @@ jobs:
             echo "GitHub commit: ${{ github.sha }}"
             echo "Repository: ${{ github.repository }}"
 
-            cd /opt/rhd-estimation/backend || exit 1
+            cd /opt/rhd-ces/backend || exit 1
 
             # Load environment for DB_USER and DB_NAME
             source .env.prod
@@ -96,8 +96,8 @@ jobs:
 
             # Backup database
             echo "Creating database backup..."
-            mkdir -p /opt/rhd-estimation/backups
-            BACKUP_FILE="/opt/rhd-estimation/backups/backup-$(date +%Y%m%d-%H%M%S).sql"
+            mkdir -p /opt/rhd-ces/backups
+            BACKUP_FILE="/opt/rhd-ces/backups/backup-$(date +%Y%m%d-%H%M%S).sql"
             docker-compose -f docker-compose.prod.yml exec -T db pg_dump -U "$DB_USER" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null || echo "Backup skipped"
 
             # Stop old containers
