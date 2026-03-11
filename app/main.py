@@ -80,6 +80,12 @@ async def health_check():
 cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
 cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
 
+# Add explicit frontend origins (Vercel deployment)
+cors_origins.extend([
+    "https://rhd-estimation-frontend.vercel.app",
+    "https://rhd-estimation-frontend.vercel.app/",
+])
+
 # For development only
 if os.getenv("APP_ENV") == "development":
     cors_origins.extend([

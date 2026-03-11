@@ -86,8 +86,10 @@ def read_items(
     region: str | None = None, 
     organization: str | None = None, 
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=1000000),
     search: str | None = None,
+    item_code: str | None = None,
+    item_description: str | None = None,
     division_id: int | None = None,
     unit: str | None = None,
     rate_min: float | None = None,
@@ -102,7 +104,9 @@ def read_items(
     Query Parameters:
     - skip: Number of items to skip (default 0)
     - limit: Number of items to return, max 1000 (default 100)
-    - search: Search term for item_code or item_description (case-insensitive)
+    - search: Search term for item_code OR item_description (case-insensitive)
+    - item_code: Search term for item_code specifically
+    - item_description: Search term for item_description specifically
     - region: Filter by region name
     - organization: Filter by organization name
     - division_id: Filter by division ID
@@ -120,6 +124,8 @@ def read_items(
             skip=skip, 
             limit=limit,
             search=search,
+            item_code=item_code,
+            item_description=item_description,
             division_id=division_id,
             unit=unit,
             rate_min=rate_min,
@@ -136,6 +142,8 @@ def count_items(
     region: str | None = None, 
     organization: str | None = None, 
     search: str | None = None,
+    item_code: str | None = None,
+    item_description: str | None = None,
     division_id: int | None = None,
     unit: str | None = None,
     rate_min: float | None = None,
@@ -154,6 +162,8 @@ def count_items(
             region=region,
             organization=organization,
             search=search,
+            item_code=item_code,
+            item_description=item_description,
             division_id=division_id,
             unit=unit,
             rate_min=rate_min,
@@ -169,8 +179,10 @@ def read_special_items(
     region: str | None = None, 
     organization: str | None = None, 
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=1000000),
     search: str | None = None,
+    item_code: str | None = None,
+    item_description: str | None = None,
     division_id: int | None = None,
     unit: str | None = None,
     rate_min: float | None = None,
@@ -189,6 +201,8 @@ def read_special_items(
             skip=skip, 
             limit=limit,
             search=search,
+            item_code=item_code,
+            item_description=item_description,
             division_id=division_id,
             unit=unit,
             rate_min=rate_min,
@@ -251,7 +265,7 @@ def export_items_csv(
     """Export Item Master in pivoted, multi-region format with Organization.
 
     Header order (as requested):
-    SI. No, Item Code, Major Division, Description, Unit,
+    Item Code, Major Division, Description, Unit,
     Dhaka Zone, Mymensingh Zone, Comilla Zone, Sylhet Zone, Khulna Zone,
     Barisal Zone, Gopalganj Zone, Rajshahi Zone, Rangpur Zone, Chattogram Zone, Organization
     """
@@ -292,7 +306,6 @@ def export_items_csv(
     output = io.StringIO()
     writer = csv.writer(output)
     headers = [
-        "SI. No",
         "Item Code",
         "Major Division",
         "Description",
@@ -304,9 +317,8 @@ def export_items_csv(
 
     # Sort rows by division then item code for stable output
     sorted_rows = sorted(grouped.values(), key=lambda r: (r["division_name"], r["item_code"]))
-    for idx, row in enumerate(sorted_rows, start=1):
+    for row in sorted_rows:
         line = [
-            idx,
             row["item_code"],
             row["division_name"],
             row["description"],
@@ -368,7 +380,6 @@ def export_items_xlsx(
     ws = wb.active
     ws.title = "Item Master"
     headers = [
-        "SI. No",
         "Item Code",
         "Major Division",
         "Description",
@@ -379,9 +390,8 @@ def export_items_xlsx(
     ws.append(headers)
 
     sorted_rows = sorted(grouped.values(), key=lambda r: (r["division_name"], r["item_code"]))
-    for idx, row in enumerate(sorted_rows, start=1):
+    for row in sorted_rows:
         line = [
-            idx,
             row["item_code"],
             row["division_name"],
             row["description"],
@@ -462,9 +472,8 @@ def import_items(
         # WARNING: This clears item master; may affect existing estimations
         crud.delete_all_items(db)
 
-    # Bulk upsert: use a single transaction for all rows (much faster)
-    count = 0
-    skipped = 0
+    # Prepare data for bulk import
+    items_to_import = []
     errors = []
     
     for idx, row in enumerate(parsed, 1):
@@ -475,37 +484,30 @@ def import_items(
                 row["rate"] = 0.0
             
             # Validate and parse the row
-            item_parsed = schemas.ItemParsed(**row)
-            
-            # Create or update the item (no individual commits)
-            crud.create_item_from_parsed_data_bulk(db, item_parsed)
-            count += 1
+            items_to_import.append(schemas.ItemParsed(**row))
             
         except ValueError as ve:
-            error_msg = f"Row {idx}: {str(ve)}"
-            errors.append(error_msg)
+            errors.append(f"Row {idx}: {str(ve)}")
         except Exception as e:
-            error_msg = f"Row {idx} ({row.get('item_code', 'unknown')}): {str(e)}"
-            errors.append(error_msg)
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            errors.append(f"Row {idx}: {str(e)}")
     
-    # Single commit for all rows
+    # Execute optimized bulk import
     try:
-        db.commit()
+        result = crud.bulk_import_items_optimized(db, items_to_import, mode=mode)
+        count = result["count"]
+        errors.extend(result["errors"])
     except Exception as e:
         db.rollback()
+        print(f"DEBUG: Bulk import failed: {e}")
         raise HTTPException(
-            status_code=400, 
+            status_code=500, 
             detail=f"Failed to save imported items: {str(e)}"
         )
     
     return {
         "message": f"Import {mode} completed", 
         "processed": count, 
-        "skipped": skipped,
+        "skipped": len(parsed) - count,
         "errors": errors[:50] if errors else None,
         "total_errors": len(errors) if errors else 0
     }

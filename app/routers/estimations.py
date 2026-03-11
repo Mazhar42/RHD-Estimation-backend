@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from typing import List, Dict, Any
+import io
+import csv
 from ..database import SessionLocal
 from .. import schemas, crud, models
 from ..security import get_current_user, check_permission, is_admin_user
@@ -153,6 +156,65 @@ def list_lines(
     current_user: models.User = Depends(check_permission("estimations:read"))
 ):
     return crud.list_estimation_lines(db, estimation_id)
+
+@router.get("/{estimation_id}/rate-mismatch-log")
+def rate_mismatch_log(
+    estimation_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:read"))
+):
+    est = db.get(models.Estimation, estimation_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    return {"items": crud.get_estimation_rate_report(db, estimation_id)}
+
+@router.get("/{estimation_id}/rate-mismatch-log.csv")
+def rate_mismatch_log_csv(
+    estimation_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:read"))
+):
+    est = db.get(models.Estimation, estimation_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    report = crud.get_estimation_rate_report(db, estimation_id)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "line_id",
+        "item_id",
+        "item_code",
+        "division",
+        "organization",
+        "region",
+        "line_rate",
+        "item_rate",
+        "alt_region",
+        "alt_rate",
+        "reason",
+    ])
+    for row in report:
+        writer.writerow([
+            row.get("line_id"),
+            row.get("item_id"),
+            row.get("item_code"),
+            row.get("division"),
+            row.get("organization"),
+            row.get("region"),
+            row.get("line_rate"),
+            row.get("item_rate"),
+            row.get("alt_region"),
+            row.get("alt_rate"),
+            row.get("reason"),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=estimation_{estimation_id}_rate_mismatch_log.csv"
+        },
+    )
 
 @router.delete("/{estimation_id}", response_model=schemas.Estimation)
 def delete_estimation(

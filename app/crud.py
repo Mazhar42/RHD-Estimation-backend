@@ -4,6 +4,7 @@ from . import models, schemas
 from sqlalchemy.exc import IntegrityError
 from .security import get_password_hash, verify_password
 from datetime import datetime
+import re
 
 # =============== User CRUD Operations ===============
 
@@ -339,6 +340,139 @@ def create_item_from_parsed_data_bulk(db: Session, item_data: schemas.ItemParsed
         # No commit here — caller handles the transaction
         return obj
 
+def bulk_import_items_optimized(db: Session, items_data: list[schemas.ItemParsed], mode: str = "append"):
+    """
+    Optimized bulk import that minimizes DB queries by pre-fetching data.
+    """
+    if not items_data:
+        return {"count": 0, "skipped": 0, "errors": []}
+    
+    # 1. Pre-fetch reference data (Organizations, Divisions, Regions)
+    # ----------------------------------------------------------------
+    # Organizations
+    all_orgs = {org.name: org for org in list_organizations(db)}
+    
+    # Divisions (map name -> Division obj) - careful with duplicates across orgs if any
+    # Assuming division names are unique globally or we handle it per org
+    # Current schema: divisions are unique by name mostly.
+    # Let's fetch all divisions and map by name.
+    all_divisions = {div.name: div for div in list_divisions(db)}
+    
+    # Regions (map (org_id, name) -> Region obj)
+    all_regions = {}
+    for region in db.query(models.Region).all():
+        all_regions[(region.organization_id, region.name)] = region
+        
+    # 2. Pre-fetch existing Items (if mode != replace)
+    # ----------------------------------------------------------------
+    # Map (item_code, region, organization) -> Item obj
+    existing_items_map = {}
+    if mode != "replace":
+        # Fetch only necessary columns to build the map if memory is concern, 
+        # but we need the object to update it.
+        # Warning: loading 50k objects into session might be heavy, but better than 50k selects.
+        # We can use yield_per if needed, but for now fetch all.
+        items_query = db.query(models.Item)
+        # If too many items, this might be slow, but still faster than N queries.
+        for item in items_query.all():
+            key = (item.item_code, item.region, item.organization)
+            existing_items_map[key] = item
+            
+    # 3. Process items in memory
+    # ----------------------------------------------------------------
+    count = 0
+    errors = []
+    
+    # Cache for newly created reference data in this transaction
+    new_orgs = {} # name -> obj
+    new_divisions = {} # name -> obj
+    new_regions = {} # (org_id, name) -> obj
+    
+    for idx, row in enumerate(items_data, 1):
+        try:
+            # Validate basic fields
+            code_clean = (row.item_code or "").strip()
+            desc_clean = (row.item_description or "").strip()
+            if not code_clean and not desc_clean:
+                continue # Skip empty rows
+                
+            if code_clean.lower() in ("none", "null", "-") or desc_clean.lower() in ("none", "null", "-"):
+                continue
+
+            # Organization
+            org_name = row.organization or "RHD"
+            org = all_orgs.get(org_name) or new_orgs.get(org_name)
+            if not org:
+                org = models.Organization(name=org_name)
+                db.add(org)
+                db.flush() # Need ID for regions/divisions
+                all_orgs[org_name] = org
+                new_orgs[org_name] = org
+            
+            # Region
+            region_name = row.region
+            if region_name:
+                reg_key = (org.org_id, region_name)
+                region = all_regions.get(reg_key) or new_regions.get(reg_key)
+                if not region:
+                    region = models.Region(name=region_name, organization_id=org.org_id)
+                    db.add(region)
+                    db.flush() # Need ID? Not really, but good to be safe
+                    all_regions[reg_key] = region
+                    new_regions[reg_key] = region
+            
+            # Division
+            div_name = row.division
+            division = all_divisions.get(div_name) or new_divisions.get(div_name)
+            if not division:
+                # Create division
+                division = models.Division(name=div_name, organization_id=org.org_id)
+                db.add(division)
+                db.flush()
+                all_divisions[div_name] = division
+                new_divisions[div_name] = division
+            
+            # Item
+            item_key = (code_clean, region_name, org_name)
+            existing_item = existing_items_map.get(item_key)
+            
+            if existing_item:
+                # Update
+                existing_item.item_description = desc_clean
+                existing_item.unit = row.unit
+                existing_item.rate = row.rate
+                existing_item.division_id = division.division_id
+                existing_item.organization = org_name
+                # db.add(existing_item) # Already in session
+            else:
+                # Create
+                new_item = models.Item(
+                    division_id=division.division_id,
+                    item_code=code_clean,
+                    item_description=desc_clean,
+                    unit=row.unit,
+                    rate=row.rate,
+                    region=region_name,
+                    organization=org_name,
+                )
+                db.add(new_item)
+                existing_items_map[item_key] = new_item # Add to map to prevent duplicates in same batch
+            
+            count += 1
+            
+        except Exception as e:
+            errors.append(f"Row {idx}: {str(e)}")
+            
+    # 4. Commit all changes
+    # ----------------------------------------------------------------
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise e
+        
+    return {"count": count, "errors": errors}
+
 def get_divisions(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Division).offset(skip).limit(limit).all()
 
@@ -441,7 +575,8 @@ def update_region(db: Session, region_id: int, data: schemas.RegionUpdate):
     return obj
 
 def get_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100,
-              search: str | None = None, division_id: int | None = None, unit: str | None = None,
+              search: str | None = None, item_code: str | None = None, item_description: str | None = None,
+              division_id: int | None = None, unit: str | None = None,
               rate_min: float | None = None, rate_max: float | None = None,
               sort_by: str = "item_code", order: str = "asc"):
     """Get paginated items with optional server-side filtering and sorting.
@@ -485,6 +620,10 @@ def get_items(db: Session, region: str | None = None, organization: str | None =
             db.func.lower(models.Item.item_code).like(st.lower()) |
             db.func.lower(models.Item.item_description).like(st.lower())
         )
+    if item_code:
+        pairs_q = pairs_q.filter(db.func.lower(models.Item.item_code).like(f"%{item_code.lower()}%"))
+    if item_description:
+        pairs_q = pairs_q.filter(db.func.lower(models.Item.item_description).like(f"%{item_description.lower()}%"))
 
     pairs = (
         pairs_q.distinct()
@@ -508,7 +647,8 @@ def get_items(db: Session, region: str | None = None, organization: str | None =
     )
 
 def count_items(db: Session, region: str | None = None, organization: str | None = None,
-                search: str | None = None, division_id: int | None = None, unit: str | None = None,
+                search: str | None = None, item_code: str | None = None, item_description: str | None = None,
+                division_id: int | None = None, unit: str | None = None,
                 rate_min: float | None = None, rate_max: float | None = None) -> int:
     """Count distinct (division_id, item_code) pairs — i.e. the number of unique grouped items."""
     pairs_q = (
@@ -534,6 +674,10 @@ def count_items(db: Session, region: str | None = None, organization: str | None
             db.func.lower(models.Item.item_code).like(st.lower()) |
             db.func.lower(models.Item.item_description).like(st.lower())
         )
+    if item_code:
+        pairs_q = pairs_q.filter(db.func.lower(models.Item.item_code).like(f"%{item_code.lower()}%"))
+    if item_description:
+        pairs_q = pairs_q.filter(db.func.lower(models.Item.item_description).like(f"%{item_description.lower()}%"))
     subq = pairs_q.distinct().subquery()
     return db.query(func.count()).select_from(subq).scalar() or 0
 
@@ -748,6 +892,139 @@ def get_item_rate(db: Session, item_id: int):
     rate = db.execute(select(models.Item.rate).where(models.Item.item_id == item_id)).scalar_one_or_none()
     return float(rate) if rate is not None else None
 
+def normalize_region_key(region: str | None) -> str:
+    s = str(region or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    s = s.replace("cumilla", "comilla")
+    s = s.replace("chittagong", "chattogram")
+    s = re.sub(r"[^a-z0-9]+", "", s)
+    return s
+
+def region_matches(a: str | None, b: str | None) -> bool:
+    ka = normalize_region_key(a)
+    kb = normalize_region_key(b)
+    if not ka or not kb:
+        return False
+    return ka == kb or ka in kb or kb in ka
+
+def find_rate_item_by_region_alias(db: Session, item: models.Item):
+    if not item:
+        return None
+    candidates = (
+        db.query(models.Item)
+        .filter(models.Item.item_code == item.item_code)
+        .filter(models.Item.division_id == item.division_id)
+        .filter(models.Item.organization == item.organization)
+        .all()
+    )
+    for cand in candidates:
+        cand_rate = float(cand.rate) if cand.rate is not None else None
+        if cand_rate and cand_rate > 0 and region_matches(cand.region, item.region):
+            return cand
+    return None
+
+def sync_estimation_line_rates(db: Session, lines: list[models.EstimationLine]):
+    updated = False
+    synced_lines = []
+    for line in lines:
+        item = line.item
+        if not item:
+            continue
+        if item.special_item:
+            synced_lines.append(line)
+            continue
+        line_rate_val = float(line.rate) if line.rate is not None else None
+        item_rate_val = float(item.rate) if item.rate is not None else None
+        if (line_rate_val is None or line_rate_val == 0) and item_rate_val and item_rate_val > 0:
+            line.rate = item_rate_val
+            line.calculated_qty = calculate_qty(
+                line.no_of_units, line.length, line.width, line.thickness, line.quantity
+            )
+            line.amount = round(line.calculated_qty * float(line.rate), 2)
+            updated = True
+            synced_lines.append(line)
+            continue
+        if (line_rate_val is None or line_rate_val == 0) and (not item_rate_val or item_rate_val == 0):
+            candidate = find_rate_item_by_region_alias(db, item)
+            if candidate:
+                line.item_id = candidate.item_id
+                line.item = candidate
+                line.rate = float(candidate.rate)
+                line.calculated_qty = calculate_qty(
+                    line.no_of_units, line.length, line.width, line.thickness, line.quantity
+                )
+                line.amount = round(line.calculated_qty * float(line.rate), 2)
+                updated = True
+                synced_lines.append(line)
+                continue
+        if line_rate_val and line_rate_val > 0:
+            synced_lines.append(line)
+            continue
+    if updated:
+        db.commit()
+    return synced_lines
+
+def get_estimation_rate_report(db: Session, estimation_id: int):
+    stmt = select(models.EstimationLine).where(models.EstimationLine.estimation_id == estimation_id).options(
+        joinedload(models.EstimationLine.item).joinedload(models.Item.division),
+        joinedload(models.EstimationLine.item).joinedload(models.Item.special_item)
+    )
+    lines = db.execute(stmt).scalars().all()
+    report = []
+    for line in lines:
+        item = line.item
+        if not item:
+            report.append({
+                "line_id": line.line_id,
+                "item_id": None,
+                "item_code": None,
+                "division": None,
+                "organization": None,
+                "region": None,
+                "line_rate": float(line.rate) if line.rate is not None else None,
+                "item_rate": None,
+                "reason": "missing item reference",
+            })
+            continue
+        if item.special_item:
+            continue
+        item_rate_val = float(item.rate) if item.rate is not None else None
+        if item_rate_val and item_rate_val > 0:
+            continue
+        candidate = find_rate_item_by_region_alias(db, item)
+        if candidate:
+            continue
+        candidates = (
+            db.query(models.Item)
+            .filter(models.Item.item_code == item.item_code)
+            .filter(models.Item.division_id == item.division_id)
+            .filter(models.Item.organization == item.organization)
+            .all()
+        )
+        alt_rates = [
+            c for c in candidates if c.rate is not None and float(c.rate) > 0
+        ]
+        best_alt = max(alt_rates, key=lambda c: float(c.rate)) if alt_rates else None
+        reason = (
+            "rate exists in other region"
+            if best_alt
+            else "no master rate for code/region/organization/division"
+        )
+        report.append({
+            "line_id": line.line_id,
+            "item_id": item.item_id,
+            "item_code": item.item_code,
+            "division": item.division.name if item.division else None,
+            "organization": item.organization,
+            "region": item.region,
+            "line_rate": float(line.rate) if line.rate is not None else None,
+            "item_rate": item_rate_val,
+            "alt_region": best_alt.region if best_alt else None,
+            "alt_rate": float(best_alt.rate) if best_alt else None,
+            "reason": reason,
+        })
+    return report
+
 def calculate_qty(no_of_units: int | None, length, width, thickness, quantity):
     if quantity is not None:
         return float(quantity)
@@ -759,14 +1036,21 @@ def calculate_qty(no_of_units: int | None, length, width, thickness, quantity):
 
 def create_estimation_line(db: Session, estimation_id: int, data: schemas.EstimationLineCreate):
     # determine rate: prefer provided rate else item's default rate
-    line_rate = get_item_rate(db, data.item_id) or 0.0
+    line_rate = get_item_rate(db, data.item_id)
+    item_id = data.item_id
+    if not line_rate or line_rate == 0:
+        base_item = db.get(models.Item, data.item_id)
+        candidate = find_rate_item_by_region_alias(db, base_item)
+        if candidate:
+            item_id = candidate.item_id
+            line_rate = float(candidate.rate)
     # calculate quantity
     calc_qty = calculate_qty(data.no_of_units, data.length, data.width, data.thickness, data.quantity)
     amount = round(calc_qty * float(line_rate), 2) if line_rate is not None else None
 
     obj = models.EstimationLine(
         estimation_id=estimation_id,
-        item_id=data.item_id,
+        item_id=item_id,
         sub_description=data.sub_description,
         no_of_units=data.no_of_units or 1,
         no_of_units_expr=data.no_of_units_expr,
@@ -823,7 +1107,7 @@ def update_estimation_line(db: Session, line_id: int, data: schemas.EstimationLi
     if data.item_id and data.item_id != line.item_id:
         line.item_id = data.item_id
         # Update rate based on new item
-        line_rate = get_item_rate(db, data.item_id) or 0.0
+        line_rate = get_item_rate(db, data.item_id)
         line.rate = line_rate
 
     line.sub_description = data.sub_description
@@ -990,13 +1274,12 @@ def list_estimation_lines(db: Session, estimation_id: int):
         joinedload(models.EstimationLine.item).joinedload(models.Item.division),
         joinedload(models.EstimationLine.item).joinedload(models.Item.special_item)
     )
-    return db.execute(stmt).scalars().all()
+    lines = db.execute(stmt).scalars().all()
+    return sync_estimation_line_rates(db, lines)
 
 def estimation_total(db: Session, estimation_id: int):
-    total = db.execute(
-        select(func.coalesce(func.sum(models.EstimationLine.amount), 0)).where(models.EstimationLine.estimation_id == estimation_id)
-    ).scalar_one()
-    return float(total or 0.0)
+    lines = list_estimation_lines(db, estimation_id)
+    return float(sum((line.amount or 0) for line in lines))
 
 def get_estimation_with_lines(db: Session, estimation_id: int):
     est = db.execute(
