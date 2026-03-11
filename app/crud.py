@@ -736,7 +736,8 @@ def delete_all_items(db: Session) -> int:
     return result.rowcount
 
 def get_special_items(db: Session, region: str | None = None, organization: str | None = None, skip: int = 0, limit: int = 100,
-                      search: str | None = None, division_id: int | None = None, unit: str | None = None,
+                      search: str | None = None, item_code: str | None = None, item_description: str | None = None,
+                      division_id: int | None = None, unit: str | None = None,
                       rate_min: float | None = None, rate_max: float | None = None,
                       sort_by: str = "item_code", order: str = "asc"):
     """Get paginated special items. skip/limit are in terms of unique (division_id, item_code) pairs."""
@@ -771,6 +772,10 @@ def get_special_items(db: Session, region: str | None = None, organization: str 
             db.func.lower(models.SpecialItem.item_code).like(st.lower()) |
             db.func.lower(models.SpecialItem.item_description).like(st.lower())
         )
+    if item_code:
+        pairs_q = pairs_q.filter(db.func.lower(models.SpecialItem.item_code).like(f"%{item_code.lower()}%"))
+    if item_description:
+        pairs_q = pairs_q.filter(db.func.lower(models.SpecialItem.item_description).like(f"%{item_description.lower()}%"))
 
     pairs = (
         pairs_q.distinct()
@@ -964,66 +969,7 @@ def sync_estimation_line_rates(db: Session, lines: list[models.EstimationLine]):
         db.commit()
     return synced_lines
 
-def get_estimation_rate_report(db: Session, estimation_id: int):
-    stmt = select(models.EstimationLine).where(models.EstimationLine.estimation_id == estimation_id).options(
-        joinedload(models.EstimationLine.item).joinedload(models.Item.division),
-        joinedload(models.EstimationLine.item).joinedload(models.Item.special_item)
-    )
-    lines = db.execute(stmt).scalars().all()
-    report = []
-    for line in lines:
-        item = line.item
-        if not item:
-            report.append({
-                "line_id": line.line_id,
-                "item_id": None,
-                "item_code": None,
-                "division": None,
-                "organization": None,
-                "region": None,
-                "line_rate": float(line.rate) if line.rate is not None else None,
-                "item_rate": None,
-                "reason": "missing item reference",
-            })
-            continue
-        if item.special_item:
-            continue
-        item_rate_val = float(item.rate) if item.rate is not None else None
-        if item_rate_val and item_rate_val > 0:
-            continue
-        candidate = find_rate_item_by_region_alias(db, item)
-        if candidate:
-            continue
-        candidates = (
-            db.query(models.Item)
-            .filter(models.Item.item_code == item.item_code)
-            .filter(models.Item.division_id == item.division_id)
-            .filter(models.Item.organization == item.organization)
-            .all()
-        )
-        alt_rates = [
-            c for c in candidates if c.rate is not None and float(c.rate) > 0
-        ]
-        best_alt = max(alt_rates, key=lambda c: float(c.rate)) if alt_rates else None
-        reason = (
-            "rate exists in other region"
-            if best_alt
-            else "no master rate for code/region/organization/division"
-        )
-        report.append({
-            "line_id": line.line_id,
-            "item_id": item.item_id,
-            "item_code": item.item_code,
-            "division": item.division.name if item.division else None,
-            "organization": item.organization,
-            "region": item.region,
-            "line_rate": float(line.rate) if line.rate is not None else None,
-            "item_rate": item_rate_val,
-            "alt_region": best_alt.region if best_alt else None,
-            "alt_rate": float(best_alt.rate) if best_alt else None,
-            "reason": reason,
-        })
-    return report
+
 
 def calculate_qty(no_of_units: int | None, length, width, thickness, quantity):
     if quantity is not None:
