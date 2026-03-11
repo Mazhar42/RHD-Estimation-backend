@@ -4,6 +4,7 @@ from . import models, schemas
 from sqlalchemy.exc import IntegrityError
 from .security import get_password_hash, verify_password
 from datetime import datetime
+from typing import List, Optional
 import re
 
 # =============== User CRUD Operations ===============

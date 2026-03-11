@@ -16,27 +16,10 @@ from pathlib import Path
 load_dotenv()
 
 # ============================================================================
-# Database Migrations (using Alembic)
+# Database Migrations (Moved to deployment script)
 # ============================================================================
-def run_migrations():
-    """Run pending database migrations using Alembic."""
-    try:
-        # Construct the alembic config path
-        alembic_dir = Path(__file__).parent.parent
-        alembic_cfg = Config(str(alembic_dir / "alembic.ini"))
-        
-        # Set the database URL for Alembic
-        alembic_cfg.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL"))
-        
-        # Run pending migrations
-        command.upgrade(alembic_cfg, "head")
-        print("[OK] Database migrations completed successfully")
-    except Exception as e:
-        print(f"[INFO] Database migration check completed (error: {type(e).__name__})")
-        print(f"  This is normal if tables already exist in production.")
-
-# Run migrations on startup
-run_migrations()
+# We do not run migrations here to avoid race conditions with multiple workers.
+# Migrations should be run via 'alembic upgrade head' in the deployment pipeline.
 
 # Initialize default roles and permissions
 db_init = SessionLocal()
