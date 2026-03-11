@@ -4,6 +4,10 @@ from sqlalchemy import pool
 from alembic import context
 import os
 from dotenv import load_dotenv
+import sys
+
+# Add the project root to sys.path so we can import 'app'
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Load environment variables
 load_dotenv()
