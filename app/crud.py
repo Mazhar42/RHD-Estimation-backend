@@ -980,6 +980,65 @@ def calculate_qty(no_of_units: int | None, length, width, thickness, quantity):
             qty *= float(d)
     return qty
 
+def create_estimation_lines_batch(db: Session, estimation_id: int, lines_data: List[schemas.EstimationLineCreate]):
+    created_lines = []
+    
+    # Pre-fetch items to avoid N+1 queries
+    item_ids = list(set(d.item_id for d in lines_data))
+    items = db.query(models.Item).filter(models.Item.item_id.in_(item_ids)).all()
+    item_map = {item.item_id: item for item in items}
+
+    for data in lines_data:
+        base_item = item_map.get(data.item_id)
+        if not base_item:
+            continue # Skip invalid items
+
+        # determine rate logic (same as create_estimation_line)
+        line_rate = float(base_item.rate) if base_item.rate is not None else 0.0
+        item_id = data.item_id
+        
+        if line_rate == 0:
+            candidate = find_rate_item_by_region_alias(db, base_item)
+            if candidate:
+                item_id = candidate.item_id
+                line_rate = float(candidate.rate)
+        
+        calc_qty = calculate_qty(data.no_of_units, data.length, data.width, data.thickness, data.quantity)
+        amount = round(calc_qty * float(line_rate), 2) if line_rate is not None else None
+
+        obj = models.EstimationLine(
+            estimation_id=estimation_id,
+            item_id=item_id,
+            sub_description=data.sub_description,
+            no_of_units=data.no_of_units or 1,
+            no_of_units_expr=data.no_of_units_expr,
+            length=data.length,
+            width=data.width,
+            thickness=data.thickness,
+            length_expr=data.length_expr,
+            width_expr=data.width_expr,
+            thickness_expr=data.thickness_expr,
+            quantity=data.quantity,
+            calculated_qty=calc_qty,
+            rate=line_rate,
+            amount=amount,
+            attachment_name=data.attachment_name,
+            attachment_base64=data.attachment_base64,
+        )
+        db.add(obj)
+        created_lines.append(obj)
+
+    # Update parent estimation updated_at once
+    est = db.get(models.Estimation, estimation_id)
+    if est:
+        est.updated_at = datetime.utcnow()
+        db.add(est)
+
+    db.commit()
+    for l in created_lines:
+        db.refresh(l)
+    return created_lines
+
 def create_estimation_line(db: Session, estimation_id: int, data: schemas.EstimationLineCreate):
     # determine rate: prefer provided rate else item's default rate
     line_rate = get_item_rate(db, data.item_id)

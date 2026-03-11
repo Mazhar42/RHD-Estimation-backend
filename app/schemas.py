@@ -292,8 +292,23 @@ class SpecialItemRequest(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-class EstimationLineCreate(EstimationLineBase):
-    pass
+class EstimationLineCreate(BaseModel):
+    item_id: int
+    sub_description: str | None = None
+    no_of_units: float | None = 1
+    no_of_units_expr: str | None = None
+    length: float | None = None
+    width: float | None = None
+    thickness: float | None = None
+    length_expr: str | None = None
+    width_expr: str | None = None
+    thickness_expr: str | None = None
+    quantity: float | None = None
+    attachment_name: str | None = None
+    attachment_base64: str | None = None
+
+class EstimationLineCreateBatch(BaseModel):
+    lines: List[EstimationLineCreate]
 
 class EstimationLine(EstimationLineBase):
     line_id: int

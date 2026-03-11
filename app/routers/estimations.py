@@ -31,6 +31,22 @@ def list_all_special_item_requests(
         return crud.list_special_item_requests(db, estimation_id=None, status=status)
     return crud.list_special_item_requests_for_user(db, estimation_id=None, user_id=current_user.user_id, status=status)
 
+@router.post("/{estimation_id}/lines/batch", response_model=List[schemas.EstimationLine])
+def add_lines_batch(
+    estimation_id: int,
+    payload: schemas.EstimationLineCreateBatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:update"))
+):
+    est = db.get(models.Estimation, estimation_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    
+    if est.created_by_id != current_user.user_id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to modify this estimation")
+
+    return crud.create_estimation_lines_batch(db, estimation_id, payload.lines)
+
 @router.post("/{estimation_id}/lines", response_model=schemas.EstimationLine)
 def add_line(
     estimation_id: int, 
