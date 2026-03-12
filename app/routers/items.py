@@ -468,9 +468,9 @@ def import_items(
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
 
     # Mode: replace or append
-    if mode == "replace":
-        # WARNING: This clears item master; may affect existing estimations
-        crud.delete_all_items(db)
+    # if mode == "replace":
+    #    # WARNING: This clears item master; may affect existing estimations
+    #    crud.delete_all_items(db)
 
     # Prepare data for bulk import
     items_to_import = []

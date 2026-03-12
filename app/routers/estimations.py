@@ -82,6 +82,22 @@ def create_special_item_request(
 
     return crud.create_special_item_request(db, estimation_id, payload, current_user.user_id)
 
+@router.post("/{estimation_id}/special-item-requests/batch", response_model=List[schemas.SpecialItemRequest])
+def create_special_item_requests_batch(
+    estimation_id: int,
+    payload: schemas.SpecialItemRequestCreateBatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(check_permission("estimations:update"))
+):
+    est = db.get(models.Estimation, estimation_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimation not found")
+    
+    if est.created_by_id != current_user.user_id and not is_admin_user(current_user):
+        raise HTTPException(status_code=403, detail="Not authorized to modify this estimation")
+
+    return crud.create_special_item_requests_batch(db, estimation_id, payload.requests, current_user.user_id)
+
 @router.get("/{estimation_id}/special-item-requests", response_model=List[schemas.SpecialItemRequest])
 def list_special_item_requests(
     estimation_id: int,

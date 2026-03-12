@@ -282,19 +282,56 @@ def parse_item_master_pivot_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]
         "Unit": idx_unit,
     }.items() if idx is None]
     if missing_base:
-        raise ValueError(f"Missing expected base headers in pivot Item Master XLSX: {missing_base}")
+        # Check if we are in a simple linear format (not pivoted) that failed detection
+        # But this function is specifically for pivoted... 
+        # Let's try to be more flexible? No, if basic columns are missing, we can't map data.
+        raise ValueError(f"Missing expected base headers in pivot Item Master XLSX: {missing_base}. Found: {headers}")
 
     # Region headers: any headers not part of base or optional SI/Organization
-    base_indices = {idx_item_code, idx_division, idx_description, idx_unit}
-    optional_indices = {idx_si, idx_org}
-    region_headers = []
-    for h, idx in header_index.items():
-        if idx in base_indices or idx in optional_indices:
+    # We also need to handle comma-separated regions in headers (e.g. "Dhaka, Mymensingh")
+    # This means one column provides rate for MULTIPLE regions.
+    
+    # Map column index -> List[region_name]
+    col_idx_to_regions: Dict[int, List[str]] = {}
+    
+    known_base_indices = {idx_item_code, idx_division, idx_description, idx_unit, idx_org, idx_si}
+    
+    for idx, h in enumerate(headers):
+        if idx in known_base_indices:
             continue
-        # Normalize Cumilla → Comilla
-        if h == "Cumilla Zone":
-            h = "Comilla Zone"
-        region_headers.append(h)
+            
+        h_str = str(h).strip()
+        if not h_str: 
+            continue
+            
+        # Split by comma or slash to handle "Dhaka, Mymensingh" or "Dhaka/Mymensingh"
+        # Also handle "Zone" suffix if present
+        parts = [p.strip() for p in h_str.replace("/", ",").split(",")]
+        
+        regions_for_col = []
+        for p in parts:
+            if not p: continue
+            # Normalize region name: add " Zone" if missing and it looks like a city name
+            # But let's trust the input mostly, just normalize casing/spaces
+            p_clean = p
+            # Common RHD zones: Dhaka, Mymensingh, Comilla, Sylhet, Chittagong, Khulna, Barisal, Rajshahi, Rangpur, Gopalganj
+            # If header is just "Dhaka", map to "Dhaka Zone" if that's the standard in DB?
+            # DB uses "Default" or whatever user imports. Let's append " Zone" if not present to match RHD standard if needed?
+            # Actually, let's keep it as is, but maybe map "Cumilla" -> "Comilla"
+            if "Cumilla" in p_clean:
+                p_clean = p_clean.replace("Cumilla", "Comilla")
+            
+            # If the header doesn't end with "Zone", should we add it? 
+            # The previous code assumed "Dhaka Zone". 
+            # If the user file has "Dhaka, Mymensingh", they probably mean "Dhaka Zone" and "Mymensingh Zone"
+            # Let's heuristically add " Zone" if it's likely a region name and doesn't have it
+            if "Zone" not in p_clean and p_clean in ["Dhaka", "Mymensingh", "Comilla", "Sylhet", "Chittagong", "Chattogram", "Khulna", "Barisal", "Barishal", "Rajshahi", "Rangpur", "Gopalganj"]:
+                 p_clean += " Zone"
+            
+            regions_for_col.append(p_clean)
+            
+        if regions_for_col:
+            col_idx_to_regions[idx] = regions_for_col
 
     data: List[Dict[str, Any]] = []
     def clean_str(value) -> str:
@@ -306,44 +343,50 @@ def parse_item_master_pivot_xlsx_bytes(file_bytes: bytes) -> List[Dict[str, Any]
         return None if s == "" or s.lower() in ("none", "null", "-") else s
 
     for row in ws.iter_rows(min_row=2):
-        def val(hname):
-            idx = header_index.get(hname)
-            if idx is None:
-                return None
-            cell = row[idx]
-            return cell.value if cell.value is not None else None
-
+        # Extract base values
         division = clean_str(row[idx_division].value if idx_division is not None else None)
         item_code = clean_str(row[idx_item_code].value if idx_item_code is not None else None)
         description = clean_str(row[idx_description].value if idx_description is not None else None)
         unit_cell = row[idx_unit] if idx_unit is not None else None
         unit = clean_unit(unit_cell.value if unit_cell else None)
         org_cell = row[idx_org] if idx_org is not None else None
-        organization = clean_str(org_cell.value if org_cell else None) or "RHD"
+        organization = clean_str(org_cell.value if org_cell else None)
 
         if not item_code and not description:
             continue
 
-        for region in region_headers:
-            rate_cell = val(region)
-            if rate_cell is None and region == "Comilla Zone":
-                rate_cell = val("Cumilla Zone")
+        # Iterate over region columns
+        for col_idx, region_list in col_idx_to_regions.items():
+            if col_idx >= len(row): continue
+            
+            rate_cell = row[col_idx]
+            rate_val = rate_cell.value if rate_cell else None
+            
             rate = None
-            if rate_cell not in (None, "-"):
+            if rate_val not in (None, "-", ""):
                 try:
-                    rate = float(rate_cell)
+                    rate = float(rate_val)
                 except (ValueError, TypeError):
                     rate = None
-            entry = {
-                "division": division,
-                "item_code": item_code,
-                "item_description": description,
-                "unit": unit,
-                "rate": rate,
-                "region": region,
-                "organization": organization,
-            }
-            data.append(entry)
+            
+            # If rate is present (or even if None, to create entry?), create entry for EACH region in this column
+            # Usually if rate is None/Empty, we might skip or import as None.
+            # Let's import even if None so we know the item exists in that region? 
+            # Or better, if rate is None, maybe the item doesn't exist there?
+            # Standard practice: Import if valid row. Rate can be 0 or None.
+            
+            for region_name in region_list:
+                entry = {
+                    "division": division,
+                    "item_code": item_code,
+                    "item_description": description,
+                    "unit": unit,
+                    "rate": rate,
+                    "region": region_name,
+                    "organization": organization,
+                }
+                data.append(entry)
+                
     return data
 
 # Removed CLI demo block to avoid unused runtime code in production

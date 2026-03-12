@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import select, func, tuple_
+from sqlalchemy import select, func, tuple_, delete
 from . import models, schemas
 from sqlalchemy.exc import IntegrityError
 from .security import get_password_hash, verify_password
@@ -364,25 +364,26 @@ def bulk_import_items_optimized(db: Session, items_data: list[schemas.ItemParsed
     for region in db.query(models.Region).all():
         all_regions[(region.organization_id, region.name)] = region
         
-    # 2. Pre-fetch existing Items (if mode != replace)
+    # 2. Pre-fetch existing Items (always fetch for duplicate check, and tracking for replace mode)
     # ----------------------------------------------------------------
     # Map (item_code, region, organization) -> Item obj
     existing_items_map = {}
-    if mode != "replace":
-        # Fetch only necessary columns to build the map if memory is concern, 
-        # but we need the object to update it.
-        # Warning: loading 50k objects into session might be heavy, but better than 50k selects.
-        # We can use yield_per if needed, but for now fetch all.
-        items_query = db.query(models.Item)
-        # If too many items, this might be slow, but still faster than N queries.
-        for item in items_query.all():
-            key = (item.item_code, item.region, item.organization)
-            existing_items_map[key] = item
+    
+    # Fetch only necessary columns to build the map if memory is concern, 
+    # but we need the object to update it.
+    # Warning: loading 50k objects into session might be heavy, but better than 50k selects.
+    # We can use yield_per if needed, but for now fetch all.
+    items_query = db.query(models.Item)
+    # If too many items, this might be slow, but still faster than N queries.
+    for item in items_query.all():
+        key = (item.item_code, item.region, item.organization)
+        existing_items_map[key] = item
             
     # 3. Process items in memory
     # ----------------------------------------------------------------
     count = 0
     errors = []
+    touched_ids = set()
     
     # Cache for newly created reference data in this transaction
     new_orgs = {} # name -> obj
@@ -444,6 +445,7 @@ def bulk_import_items_optimized(db: Session, items_data: list[schemas.ItemParsed
                 existing_item.rate = row.rate
                 existing_item.division_id = division.division_id
                 existing_item.organization = org_name
+                touched_ids.add(existing_item.item_id)
                 # db.add(existing_item) # Already in session
             else:
                 # Create
@@ -468,6 +470,30 @@ def bulk_import_items_optimized(db: Session, items_data: list[schemas.ItemParsed
     # ----------------------------------------------------------------
     try:
         db.commit()
+        
+        # 5. If Replace Mode: Delete items that were not touched (and not used)
+        if mode == "replace":
+            # Identify items to delete: existing items NOT in touched_ids
+            # We must be careful not to delete items used in estimation_lines or special_item_requests
+            
+            # Subquery for items used in estimation lines
+            used_in_lines = select(models.EstimationLine.item_id).distinct()
+            
+            # Subquery for items used in special item requests
+            used_in_requests = select(models.SpecialItemRequest.item_id).where(models.SpecialItemRequest.item_id.is_not(None)).distinct()
+            
+            stmt = delete(models.Item).where(
+                models.Item.item_id.notin_(touched_ids)
+            ).where(
+                models.Item.item_id.notin_(used_in_lines)
+            ).where(
+                models.Item.item_id.notin_(used_in_requests)
+            )
+            
+            result = db.execute(stmt)
+            db.commit()
+            # print(f"DEBUG: Deleted {result.rowcount} unused items in replace mode")
+
     except Exception as e:
         db.rollback()
         raise e
@@ -1185,6 +1211,54 @@ def create_special_item_request(db: Session, estimation_id: int, data: schemas.S
     db.commit()
     db.refresh(obj)
     return obj
+
+def create_special_item_requests_batch(db: Session, estimation_id: int, requests: list[schemas.SpecialItemRequestCreate], user_id: int):
+    # Prepare batch of requests
+    objs = []
+    base_ts = int(datetime.utcnow().timestamp() * 1000)
+    
+    for idx, req in enumerate(requests):
+        item_code = f"SP-{base_ts}-{idx}"
+        obj = models.SpecialItemRequest(
+            estimation_id=estimation_id,
+            division_id=req.division_id,
+            item_description=req.item_description,
+            unit=req.unit,
+            rate=req.rate,
+            region=req.region,
+            organization=req.organization,
+            item_code=req.item_code or item_code,
+            attachment_name=req.attachment_name,
+            attachment_base64=req.attachment_base64,
+            sub_description=req.sub_description,
+            no_of_units=req.no_of_units,
+            no_of_units_expr=req.no_of_units_expr,
+            length=req.length,
+            width=req.width,
+            thickness=req.thickness,
+            length_expr=req.length_expr,
+            width_expr=req.width_expr,
+            thickness_expr=req.thickness_expr,
+            quantity=req.quantity,
+            requested_by_id=user_id,
+            status="pending",
+        )
+        db.add(obj)
+        objs.append(obj)
+
+    # Update parent estimation updated_at and updated_by_id
+    est = db.get(models.Estimation, estimation_id)
+    if est:
+        est.updated_at = datetime.utcnow()
+        est.updated_by_id = user_id
+        db.add(est)
+
+    db.commit()
+    # Refreshing all might be expensive, just return them with IDs
+    # But since we need IDs for response, we can refresh
+    for obj in objs:
+        db.refresh(obj)
+    return objs
 
 def list_special_item_requests(db: Session, estimation_id: int | None = None, status: str | None = None):
     query = db.query(models.SpecialItemRequest).options(

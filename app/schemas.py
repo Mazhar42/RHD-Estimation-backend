@@ -339,6 +339,30 @@ class Estimation(EstimationBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+class SpecialItemRequestCreate(BaseModel):
+    division_id: int
+    item_description: str
+    unit: Optional[str] = None
+    rate: Optional[float] = None
+    region: str
+    organization: str
+    item_code: Optional[str] = None
+    attachment_name: Optional[str] = None
+    attachment_base64: Optional[str] = None
+    sub_description: Optional[str] = None
+    no_of_units: float | None = 1
+    no_of_units_expr: Optional[str] = None
+    length: Optional[float] = None
+    width: Optional[float] = None
+    thickness: Optional[float] = None
+    length_expr: Optional[str] = None
+    width_expr: Optional[str] = None
+    thickness_expr: Optional[str] = None
+    quantity: Optional[float] = None
+
+class SpecialItemRequestCreateBatch(BaseModel):
+    requests: List[SpecialItemRequestCreate]
+
 class EstimationUpdate(BaseModel):
     estimation_name: Optional[str] = None
 
